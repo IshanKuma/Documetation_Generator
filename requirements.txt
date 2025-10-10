@@ -1,0 +1,63 @@
+# ==========================================
+# Documentation Generator Dependencies
+# ==========================================
+
+# Google Gemini AI API Client
+# Used for: AI-powered content generation and documentation planning
+# Free tier: 15 requests/min, 1,500 requests/day
+google-generativeai>=0.3.0
+
+# Environment Variable Management
+# Used for: Loading configuration from .env file
+# Purpose: Securely store API keys and settings
+python-dotenv>=1.0.0
+
+# Word Document Generation
+# Used for: Creating and formatting .docx files
+# Purpose: Assembling final documentation with styles and images
+python-docx>=1.1.0
+
+# Browser Automation
+# Used for: Capturing screenshots of code and running applications
+# Purpose: Automated screenshot generation via headless browser
+selenium>=4.16.0
+
+# WebDriver Management
+# Used for: Auto-downloading and managing Chrome/Firefox drivers
+# Purpose: Eliminates manual driver setup
+webdriver-manager>=4.0.1
+
+# Image Processing
+# Used for: Image manipulation and optimization
+# Purpose: Processing screenshots before embedding in documents
+Pillow>=10.0.0
+
+# ==========================================
+# Optional Dependencies
+# ==========================================
+
+# PDF Export (Optional - Enable with ENABLE_PDF_EXPORT=true in .env)
+# Why optional: Not all users need PDF output, and dependencies vary by platform
+#
+# Installation notes:
+# - Windows users: pip install python-docx2pdf (requires Microsoft Word installed)
+# - Linux/macOS users: Install LibreOffice instead (no Python package needed)
+#   - Ubuntu/Debian: sudo apt install libreoffice-writer
+#   - macOS: brew install --cask libreoffice
+#   - Fedora: sudo dnf install libreoffice-writer
+#
+# python-docx2pdf>=0.1.8  # Windows only - best quality, uses Word COM interface
+# reportlab>=4.0.0        # Future: Pure Python fallback (not yet implemented)
+
+# Progress Bars
+# tqdm>=4.66.0
+
+# Testing
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# pytest-cov>=4.1.0
+
+# Code Quality
+# black>=23.0.0
+# flake8>=6.1.0
+# mypy>=1.7.0

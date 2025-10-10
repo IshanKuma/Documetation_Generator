@@ -1,0 +1,274 @@
+# ========================================
+# Documentation Generator - .gitignore
+# ========================================
+# Last Updated: 2025-10-10
+# Project: AI-Powered Documentation Generator (Gemini Edition)
+# Reference: claude.md (Security Best Practices section)
+
+# ========================================
+# 🔐 SECURITY - CRITICAL FILES
+# ========================================
+# Never commit these files as they contain sensitive data
+
+# Environment variables (contains GEMINI_API_KEY and other secrets)
+.env
+.env.local
+.env.*.local
+*.backup.env
+
+# API keys and credentials
+secrets/
+config/prod/
+*.key
+*.pem
+
+# ========================================
+# 📁 PROJECT-SPECIFIC FILES
+# ========================================
+
+# Repomix output files (contains entire codebase, can be large and sensitive)
+repomix-output.txt
+repomix-output.xml
+repomix-output.md
+repomix*.txt
+repomix*.xml
+
+# Generated documentation (output directory)
+output/
+*.docx
+*.pdf
+documentation.docx
+documentation.pdf
+
+# Screenshots directory (can get large, generated files)
+screenshots/
+*.png
+*.jpg
+*.jpeg
+!examples/*.png  # Allow example screenshots if you create an examples/ folder
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+
+# ========================================
+# 🐍 PYTHON
+# ========================================
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.pytest_cache/
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ========================================
+# 🌐 SELENIUM / BROWSER DRIVERS
+# ========================================
+
+# WebDriver executables
+chromedriver
+geckodriver
+*.exe  # Windows driver executables
+
+# WebDriver logs
+selenium.log
+geckodriver.log
+chromedriver.log
+
+# ========================================
+# 💻 IDE / EDITOR FILES
+# ========================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Spyder
+.spyderproject
+.spyproject
+
+# ========================================
+# 🖥️ OPERATING SYSTEM FILES
+# ========================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+.directory
+.Trash-*
+.nfs*
+
+# ========================================
+# 📦 DEPENDENCIES / PACKAGES
+# ========================================
+
+# Node modules (if you add any JS tools later)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ========================================
+# 📝 LOGS & TEMPORARY FILES
+# ========================================
+
+# Log files
+*.log
+logs/
+*.log.*
+error.log
+debug.log
+
+# Temporary files
+tmp/
+temp/
+*.temp
+*.tmp
+
+# ========================================
+# 🔄 VERSION CONTROL
+# ========================================
+
+# Git worktrees (from global guidelines)
+.git/worktrees/
+
+# ========================================
+# 🧪 TESTING & DEVELOPMENT
+# ========================================
+
+# Test output
+test-output/
+test-results/
+
+# Development databases
+*.db
+*.sqlite
+*.sqlite3
+
+# ========================================
+# 📚 DOCUMENTATION DRAFTS
+# ========================================
+
+# Draft documentation (keep only final versions in repo)
+drafts/
+*-draft.md
+*-DRAFT.md
+
+# ========================================
+# ALLOWED EXCEPTIONS
+# ========================================
+# Use ! to explicitly include files that would otherwise be ignored
+# Example: !.env.example  # Template file without secrets
