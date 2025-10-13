@@ -1,0 +1,166 @@
+# ==========================================
+# Documentation Generator - Docker Compose
+# ==========================================
+# Complete container orchestration with all configuration
+# No separate .env file needed - all variables defined here
+
+version: '3.8'
+
+services:
+  doc-generator:
+    # Build configuration
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Container name
+    container_name: documentation-generator
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Environment Variables
+    # ==========================================
+    # IMPORTANT: Replace placeholder values with your actual configuration
+    # Especially: GEMINI_API_KEY, PROJECT_PATH, PROJECT_NAME
+    environment:
+      # ==========================================
+      # Google Gemini API Configuration
+      # ==========================================
+      # Get your free API key from: https://aistudio.google.com/apikey
+      - GEMINI_API_KEY=your_gemini_api_key_here
+      - GEMINI_MODEL=gemini-2.5-pro
+      - GEMINI_TEMPERATURE=0.7
+      - GEMINI_MAX_OUTPUT_TOKENS=8000
+      - GEMINI_REQUEST_DELAY=2
+
+      # ==========================================
+      # Project Configuration
+      # ==========================================
+      # PROJECT_PATH should point to the mounted project directory in the container
+      - PROJECT_NAME=Your Project Name
+      - PROJECT_PATH=/app/project
+      - PROJECT_DESCRIPTION=Brief description of your project
+
+      # ==========================================
+      # Repomix Configuration (Optional)
+      # ==========================================
+      # For better AI context, generate a repomix file first:
+      # Command: repomix /path/to/project -o repomix-output.xml
+      # Then place it in the project directory
+      - REPOMIX_FILE_PATH=/app/project/repomix-output.xml
+      - USE_REPOMIX=true
+
+      # ==========================================
+      # Output Configuration
+      # ==========================================
+      - OUTPUT_DIRECTORY=/app/output
+      - OUTPUT_FILENAME=documentation.docx
+      - SCREENSHOTS_DIRECTORY=/app/screenshots
+
+      # ==========================================
+      # Screenshot Configuration
+      # ==========================================
+      - ENABLE_SCREENSHOTS=true
+      # Browser: 'chrome' or 'firefox' (chrome recommended for Docker)
+      - BROWSER_CHOICE=chrome
+      - SCREENSHOT_WAIT_TIME=3
+
+      # ==========================================
+      # Live Application Screenshots (Optional)
+      # ==========================================
+      # Enable to capture screenshots of running applications
+      # Useful for web apps, APIs, dashboards
+      - LIVE_APP_ENABLED=false
+      - LIVE_APP_URL_HOME=http://host.docker.internal:3000
+      - LIVE_APP_URL_DASHBOARD=http://host.docker.internal:3000/dashboard
+      - LIVE_APP_URL_API_DOCS=http://host.docker.internal:8000/docs
+
+      # ==========================================
+      # Documentation Sections Control
+      # ==========================================
+      - INCLUDE_OVERVIEW=true
+      - INCLUDE_ARCHITECTURE=true
+      - INCLUDE_INSTALLATION=true
+      - INCLUDE_USAGE=true
+      - INCLUDE_API_REFERENCE=true
+      - INCLUDE_DEVELOPMENT_GUIDE=true
+      - INCLUDE_TROUBLESHOOTING=true
+      - INCLUDE_DEPLOYMENT=false
+
+      # ==========================================
+      # Advanced Settings
+      # ==========================================
+      - MAX_CODE_BLOCK_LINES=50
+      - MAX_FILE_SIZE_KB=100
+      - EXCLUDED_DIRECTORIES=node_modules,.git,__pycache__,venv,.venv,dist,build,target,bin,obj
+
+      # ==========================================
+      # PDF Export (Optional)
+      # ==========================================
+      # Enable to generate PDF in addition to DOCX
+      # Note: PDF quality in Docker may be lower than native
+      - ENABLE_PDF_EXPORT=false
+
+    # Volume Mounts
+    # ==========================================
+    # Map host directories to container paths
+    volumes:
+      # OUTPUT: Where generated documentation will be saved
+      # Change ./output to your preferred output location
+      - ./output:/app/output
+
+      # SCREENSHOTS: Where captured screenshots are stored
+      # Change ./screenshots to your preferred location
+      - ./screenshots:/app/screenshots
+
+      # PROJECT: The codebase to document
+      # IMPORTANT: Change this to point to the project you want to document
+      # Examples:
+      #   - /path/to/your/project:/app/project          (Linux/macOS)
+      #   - C:/Users/YourName/Projects/myapp:/app/project (Windows)
+      # For testing this tool itself, use:
+      - .:/app/project
+
+    # Resource Limits (Optional)
+    # ==========================================
+    # Uncomment to limit container resource usage
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1.0'
+    #       memory: 2G
+
+    # Network Configuration
+    # ==========================================
+    # Use host network if you need to capture screenshots of apps running on localhost
+    # network_mode: host
+
+    # Healthcheck (Optional)
+    # ==========================================
+    # Uncomment to monitor container health
+    # healthcheck:
+    #   test: ["CMD", "python", "-c", "import google.generativeai"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 10s
+
+# ==========================================
+# Volumes (Optional Named Volumes)
+# ==========================================
+# Uncomment if you prefer named volumes over bind mounts
+# volumes:
+#   output-data:
+#   screenshots-data:
+
+# ==========================================
+# Networks (Optional)
+# ==========================================
+# Uncomment if you need custom network configuration
+# networks:
+#   doc-generator-network:
+#     driver: bridge
