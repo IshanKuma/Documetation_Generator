@@ -186,7 +186,7 @@ class GeminiDocAgent:
 
         print(f"✓ Initialized Gemini model: {self.model_name}")
     
-    def _make_request(self, prompt: str, delay: bool = True) -> str:
+    def _make_request(self, prompt: str, delay: bool = True, json_mode: bool = False) -> str:
         """Make a request to Gemini API with rate limiting and error handling.
 
         Why rate limiting:
@@ -199,11 +199,18 @@ class GeminiDocAgent:
         - Single retry with 5s delay handles 99% of temporary issues
         - Prevents entire documentation generation from failing due to one hiccup
 
+        Why json_mode parameter:
+        - Gemini sometimes returns prose instead of JSON despite prompt instructions
+        - Setting response_mime_type='application/json' forces JSON output
+        - Critical for documentation plan parsing to avoid fallback to 3 sections
+
         Args:
             prompt (str): The prompt to send to Gemini
             delay (bool): Whether to apply rate limit delay before request.
                          Set to False for first request in a session to avoid
                          unnecessary wait.
+            json_mode (bool): Whether to force JSON response format.
+                            Set to True when expecting structured JSON output.
 
         Returns:
             str: The generated text response from Gemini
@@ -220,8 +227,23 @@ class GeminiDocAgent:
         if delay:
             time.sleep(self.request_delay)
 
+        # Build generation configuration
+        # Base settings: temperature and max tokens from environment
+        generation_config = {
+            'temperature': self.temperature,
+            'max_output_tokens': self.max_tokens,
+        }
+
+        # Force JSON mode for structured outputs (documentation plans)
+        # This prevents Gemini from returning prose instead of JSON
+        if json_mode:
+            generation_config['response_mime_type'] = 'application/json'
+
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
             return response.text
         except Exception as e:
             # Error handling: Common issues include rate limits, network errors,
@@ -231,7 +253,10 @@ class GeminiDocAgent:
             time.sleep(5)  # Wait longer on error (possible rate limit issue)
 
             # Retry once without additional error handling (let it fail if persistent)
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
             return response.text
     
     def create_documentation_plan(self, context: str, project_name: str) -> DocumentationPlan:
@@ -307,27 +332,46 @@ Include these sections in order:
 
 Make it comprehensive but well-organized. Return ONLY valid JSON, nothing else."""
 
-        # Make API request (delay=False because this is typically first request)
-        response = self._make_request(prompt, delay=False)
+        # Make API request with JSON mode enabled
+        # json_mode=True forces Gemini to return valid JSON instead of prose
+        # delay=False because this is typically the first request in the pipeline
+        response = self._make_request(prompt, delay=False, json_mode=True)
 
         # JSON cleanup: Gemini API quirk
-        # Problem: Despite "return ONLY JSON" in prompt, Gemini often wraps responses
-        # in markdown code blocks: ```json\n{...}\n```
+        # Problem: Despite json_mode and "return ONLY JSON" in prompt, Gemini occasionally
+        # still wraps responses in markdown code blocks: ```json\n{...}\n```
         # Why this happens: Model trained on markdown-formatted conversations
-        # Solution: Strip code block markers before parsing
+        # Solution: Robustly strip code block markers before parsing
         response = response.strip()
-        if response.startswith('```'):
-            # Remove first line (```json or ```) and last line (```)
-            lines = response.split('\n')
-            # Handle both ```json and ``` markers
-            response = '\n'.join(lines[1:-1] if lines[-1].strip() == '```' else lines[1:])
 
-        # Additional cleanup for any remaining markers
-        response = response.replace('```json', '').replace('```', '').strip()
+        # Remove markdown code block markers if present
+        if response.startswith('```'):
+            # Find the first line break (end of opening marker)
+            first_newline = response.find('\n')
+            if first_newline != -1:
+                response = response[first_newline + 1:]  # Skip first line (```json or ```)
+
+            # Remove closing ``` if present at the end
+            if response.rstrip().endswith('```'):
+                # Find last occurrence of ```
+                last_backticks = response.rstrip().rfind('```')
+                response = response[:last_backticks]
+
+        response = response.strip()
 
         # Parse JSON with fallback for robustness
         try:
             plan_json = json.loads(response)
+
+            # Normalize key names: Gemini sometimes uses alternative key names
+            # Handle "planTitle" or "title" for document title
+            if "planTitle" in plan_json and "title" not in plan_json:
+                plan_json["title"] = plan_json["planTitle"]
+
+            # Handle "documentationSections" or "sections" for sections array
+            if "documentationSections" in plan_json and "sections" not in plan_json:
+                plan_json["sections"] = plan_json["documentationSections"]
+
         except json.JSONDecodeError as e:
             # Error handling: If AI returns invalid JSON, use basic fallback structure
             # Why fallback instead of failing: Better to have basic documentation than none
@@ -345,7 +389,7 @@ Make it comprehensive but well-organized. Return ONLY valid JSON, nothing else."
                     {"title": "Usage", "level": 1, "needs_images": True, "image_descriptions": ["example usage"]},
                 ]
             }
-        
+
         return DocumentationPlan(
             title=plan_json["title"],
             sections=[DocumentSection(
@@ -454,18 +498,24 @@ Return ONLY a JSON array (no markdown, no code blocks):
 
 Return only valid JSON."""
 
-        response = self._make_request(prompt)
-        
-        # Clean response
+        response = self._make_request(prompt, json_mode=True)
+
+        # Clean response (remove markdown code blocks if present)
         response = response.strip()
         if response.startswith('```'):
-            lines = response.split('\n')
-            response = '\n'.join(lines[1:-1] if lines[-1].strip() == '```' else lines[1:])
-        response = response.replace('```json', '').replace('```', '').strip()
-        
+            first_newline = response.find('\n')
+            if first_newline != -1:
+                response = response[first_newline + 1:]
+            if response.rstrip().endswith('```'):
+                last_backticks = response.rstrip().rfind('```')
+                response = response[:last_backticks]
+        response = response.strip()
+
         try:
             return json.loads(response)
-        except:
+        except json.JSONDecodeError as e:
+            print(f"⚠️  Failed to parse screenshot targets JSON: {e}")
+            print(f"Response was: {response[:200]}")
             return []
 
 
