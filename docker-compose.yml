@@ -8,7 +8,10 @@ version: '3.8'
 
 services:
   doc-generator:
-    # Build configuration
+    # Image name (uses existing image if available, builds if not)
+    image: documentation_generator-doc-generator:latest
+
+    # Build configuration (optional - only used if image doesn't exist)
     build:
       context: .
       dockerfile: Dockerfile
