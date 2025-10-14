@@ -312,33 +312,38 @@ Project: {project_name}
 Codebase Context:
 {context}
 
-Create a detailed outline for technical documentation. Return ONLY a JSON object (no markdown, no code blocks) with this exact structure:
+Create a detailed outline for technical documentation. You MUST return a JSON object with EXACTLY this structure at the root level - do NOT wrap it in any outer object:
+
 {{
     "title": "Project Documentation Title",
     "sections": [
         {{
             "title": "Section Title",
             "level": 1,
-            "content_description": "What this section should cover",
-            "needs_images": true,
-            "image_descriptions": ["description of screenshot 1"],
-            "needs_code_examples": true
+            "needs_images": false,
+            "image_descriptions": []
         }}
     ]
 }}
 
-Include these sections in order:
+CRITICAL REQUIREMENTS:
+1. Return ONLY the JSON object shown above - no wrapper objects, no extra keys at root level
+2. The root object MUST have exactly two keys: "title" and "sections"
+3. Do NOT wrap this in "documentation_plan", "plan", or any other outer key
+4. Each section MUST have: "title" (string), "level" (1 or 2), "needs_images" (boolean), "image_descriptions" (array)
+
+Include these sections (create 9-12 sections total):
 1. Overview/Introduction (level 1)
-2. Architecture & Design (level 1)
+2. Architecture & Design (level 1) - with 2-3 level 2 subsections
 3. Installation & Setup (level 1)
-4. Core Components (level 1) with subsections (level 2) for each major component
-5. API Reference (level 1) - if applicable
-6. Usage Examples (level 1)
-7. Configuration (level 1)
+4. Core Components (level 1) - with 2-4 level 2 subsections for major components
+5. Configuration (level 1)
+6. Usage Guide (level 1) - with 2-3 level 2 subsections
+7. API Reference (level 1) - if applicable
 8. Development Guide (level 1)
 9. Troubleshooting (level 1)
 
-Make it comprehensive but well-organized. Return ONLY valid JSON, nothing else."""
+Return ONLY the JSON object, nothing else."""
 
         # Make API request with JSON mode enabled
         # json_mode=True forces Gemini to return valid JSON instead of prose
@@ -371,16 +376,48 @@ Make it comprehensive but well-organized. Return ONLY valid JSON, nothing else."
         try:
             plan_json = json.loads(response)
 
+            # Handle nested response: Gemini sometimes wraps the response in an outer key
+            # Check for common wrapper keys and unwrap if found
+            if len(plan_json) == 1 and "documentation_plan" in plan_json:
+                print("   Unwrapping nested 'documentation_plan' key")
+                plan_json = plan_json["documentation_plan"]
+            elif len(plan_json) == 1 and "plan" in plan_json:
+                print("   Unwrapping nested 'plan' key")
+                plan_json = plan_json["plan"]
+
             # Normalize key names: Gemini sometimes uses alternative key names
             # Handle "planTitle" or "title" for document title
             if "planTitle" in plan_json and "title" not in plan_json:
                 plan_json["title"] = plan_json["planTitle"]
 
+            # Handle "project_name" as title fallback
+            if "title" not in plan_json and "project_name" in plan_json:
+                plan_json["title"] = f"{plan_json['project_name']} Documentation"
+
             # Handle "documentationSections" or "sections" for sections array
             if "documentationSections" in plan_json and "sections" not in plan_json:
                 plan_json["sections"] = plan_json["documentationSections"]
 
-        except json.JSONDecodeError as e:
+            # Handle other common variations
+            if "chapters" in plan_json and "sections" not in plan_json:
+                plan_json["sections"] = plan_json["chapters"]
+            if "content_sections" in plan_json and "sections" not in plan_json:
+                plan_json["sections"] = plan_json["content_sections"]
+            if "documentation_sections" in plan_json and "sections" not in plan_json:
+                plan_json["sections"] = plan_json["documentation_sections"]
+
+            # Validate required keys exist after normalization
+            # If either key is missing, treat as invalid response
+            if "title" not in plan_json or "sections" not in plan_json:
+                print(f"⚠️  Invalid plan structure: missing required keys")
+                print(f"   Available keys: {list(plan_json.keys())}")
+                # Print full JSON for debugging (pretty printed)
+                print(f"   Full response structure:")
+                print(json.dumps(plan_json, indent=2)[:1000])
+                # Trigger fallback by raising KeyError
+                raise KeyError("Missing required keys in plan JSON")
+
+        except (json.JSONDecodeError, KeyError) as e:
             # Error handling: If AI returns invalid JSON, use basic fallback structure
             # Why fallback instead of failing: Better to have basic documentation than none
             # This can happen if: AI misunderstands prompt, network corruption, or API issues
@@ -417,7 +454,7 @@ Make it comprehensive but well-organized. Return ONLY valid JSON, nothing else."
         context = context[:80000]
         previous_sections = previous_sections[-10000:]
         
-        prompt = f"""Generate detailed technical documentation content for this section.
+        prompt = f"""Generate concise, professional documentation content for this section targeted at business stakeholders and technical managers.
 
 Section Title: {section.title}
 Section Level: {section.level}
@@ -428,17 +465,23 @@ Full Project Context:
 Previously Written Sections (for continuity):
 {previous_sections}
 
-Requirements:
-1. Write comprehensive, technical content appropriate for this section
-2. Use clear, professional language suitable for developers
-3. Include specific code examples where relevant (wrap them in CODE_BLOCK_START and CODE_BLOCK_END)
-4. Be specific and detailed based on the actual code, not generic
-5. If this section needs images, write content that naturally references them with [IMAGE: description] placeholders
-6. Write 400-1000 words depending on section importance
-7. Use markdown formatting (**, *, lists) for structure
-8. Focus on practical, actionable information
+CRITICAL REQUIREMENTS:
+1. Write CONCISE content (200-400 words for level 1 sections, 150-250 words for level 2 subsections)
+2. Focus on WHAT the system does and WHY, not implementation details
+3. DO NOT include code snippets unless absolutely essential for setup/configuration
+4. For technical concepts, describe them conceptually - screenshots will show implementation
+5. Use clear, professional language suitable for stakeholders
+6. If this section needs images, reference them with [IMAGE: description] placeholders
+7. Use markdown formatting (**, *, bullet points) for readability
+8. Focus on benefits, capabilities, and high-level architecture
 
-Generate ONLY the content for this section. No preamble, no "Here's the content:", just the actual documentation text."""
+AVOID:
+- Long code examples (use screenshots instead)
+- Implementation details (focus on concepts)
+- Repetitive information
+- Unnecessary technical jargon
+
+Generate ONLY the section content. No preamble, no explanations about the content."""
 
         content = self._make_request(prompt)
         
@@ -973,12 +1016,15 @@ class DocumentAssembler:
         date_run.font.italic = True
         date_run.font.color.rgb = RGBColor(128, 128, 128)
         
-        footer_para = self.doc.add_paragraph()
-        footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        footer_run = footer_para.add_run("Powered by Google Gemini AI")
-        footer_run.font.size = Pt(9)
-        footer_run.font.color.rgb = RGBColor(150, 150, 150)
-        
+        # Add author/organization if specified in environment
+        author = os.getenv('DOCUMENTATION_AUTHOR', '')
+        if author:
+            author_para = self.doc.add_paragraph()
+            author_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            author_run = author_para.add_run(f"Author: {author}")
+            author_run.font.size = Pt(10)
+            author_run.font.color.rgb = RGBColor(100, 100, 100)
+
         self.doc.add_page_break()
     
     def add_section(self, section: DocumentSection):
@@ -1374,9 +1420,10 @@ class DocumentationGenerator:
     def __init__(self):
         self.project_name = os.getenv('PROJECT_NAME', 'My Project')
         self.project_path = Path(os.getenv('PROJECT_PATH', '.'))
-        
+
         self.gemini_agent = GeminiDocAgent()
         self.screenshot_agent = ScreenshotAgent()
+        self.mermaid_agent = MermaidAgent()
         self.assembler = DocumentAssembler()
     
     def load_context(self) -> str:
@@ -1494,7 +1541,53 @@ class DocumentationGenerator:
                         section.images[j]['path'] = path
         
         print("✓ Content generation complete\n")
-        
+
+        # Phase 3.4: Generate Mermaid diagrams for architecture sections
+        enable_mermaid = os.getenv('ENABLE_MERMAID_DIAGRAMS', 'true').lower() == 'true'
+        if enable_mermaid and self.mermaid_agent.use_mermaid:
+            print("🎨 Phase 3.4: Generating architecture diagrams...")
+
+            for section in plan.sections:
+                # Generate diagrams for architecture/design sections
+                if any(keyword in section.title.lower()
+                       for keyword in ['architecture', 'design', 'overview', 'components']):
+                    print(f"    Generating diagram for: {section.title}")
+
+                    # Determine diagram type based on section
+                    diagram_type = "flowchart"
+                    if "component" in section.title.lower():
+                        diagram_type = "flowchart"
+                    elif "architecture" in section.title.lower():
+                        diagram_type = "flowchart"
+
+                    # Generate Mermaid code
+                    description = f"System architecture diagram for {section.title}"
+                    mermaid_code = self.mermaid_agent.generate_diagram_code(
+                        self.gemini_agent, context, diagram_type, description
+                    )
+
+                    if mermaid_code:
+                        # Render to PNG
+                        diagram_name = section.title.lower().replace(' ', '_')
+                        diagram_path = self.mermaid_agent.render_diagram(mermaid_code, diagram_name)
+
+                        if diagram_path:
+                            # Add diagram to section images
+                            if not section.images:
+                                section.images = []
+                            section.images.insert(0, {
+                                'description': f'Architecture Diagram: {section.title}',
+                                'path': diagram_path
+                            })
+                            # Store mermaid diagram info
+                            section.mermaid_diagrams.append({
+                                'description': description,
+                                'code': mermaid_code,
+                                'path': diagram_path
+                            })
+
+            print("✓ Architecture diagrams generated\n")
+
         # Phase 3.5: Capture live app screenshots
         live_app_enabled = os.getenv('LIVE_APP_ENABLED', 'false').lower() == 'true'
         if live_app_enabled:

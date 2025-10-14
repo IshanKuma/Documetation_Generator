@@ -16,20 +16,30 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies for Chrome/Chromium and screenshots
+# Install system dependencies for Chrome/Chromium, screenshots, and diagram generation
 # Why these packages:
 # - chromium: Headless browser for screenshots (lighter than full Chrome)
 # - chromium-driver: Selenium WebDriver for Chromium
 # - fonts-liberation: Better font rendering in screenshots
+# - nodejs, npm: Required for mermaid-cli diagram rendering
+# - libreoffice-writer: For PDF export on Linux
 # - wget, gnupg: For package management
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     chromium-driver \
     fonts-liberation \
     fonts-dejavu-core \
+    nodejs \
+    npm \
+    libreoffice-writer \
+    libreoffice-java-common \
     wget \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Mermaid CLI for diagram rendering
+# Why: Enables generation of architecture diagrams from text-based Mermaid code
+RUN npm install -g @mermaid-js/mermaid-cli
 
 # Set Chromium path for Selenium
 ENV CHROME_BIN=/usr/bin/chromium \
@@ -49,8 +59,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY doc_generator.py .
 COPY run_doc_generator.py .
 
-# Create directories for output and screenshots
-RUN mkdir -p /app/output /app/screenshots
+# Create directories for output, screenshots, and mermaid diagrams
+RUN mkdir -p /app/output /app/screenshots /app/mermaid_diagrams
 
 # Create non-root user for security
 # Running as root in containers is a security risk

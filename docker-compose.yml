@@ -67,6 +67,13 @@ services:
       - SCREENSHOT_WAIT_TIME=3
 
       # ==========================================
+      # Mermaid Diagram Configuration
+      # ==========================================
+      # Enable AI-generated architecture diagrams (flowcharts, sequence diagrams, etc.)
+      - ENABLE_MERMAID_DIAGRAMS=true
+      - MERMAID_DIAGRAMS_DIRECTORY=/app/mermaid_diagrams
+
+      # ==========================================
       # Live Application Screenshots (Optional)
       # ==========================================
       # Enable to capture screenshots of running applications
@@ -113,6 +120,10 @@ services:
       # SCREENSHOTS: Where captured screenshots are stored
       # Change ./screenshots to your preferred location
       - ./screenshots:/app/screenshots
+
+      # MERMAID DIAGRAMS: Where generated diagrams are stored
+      # Change ./mermaid_diagrams to your preferred location
+      - ./mermaid_diagrams:/app/mermaid_diagrams
 
       # PROJECT: The codebase to document
       # IMPORTANT: Change this to point to the project you want to document

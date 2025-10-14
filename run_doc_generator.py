@@ -20,10 +20,15 @@ Author: Documentation Generator Team
 Last Updated: 2025-10-09
 """
 
+from dotenv import load_dotenv
 import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+
+load_dotenv(override=True)
+
 
 # ANSI color codes for terminal output (makes errors/success messages stand out)
 class Colors:
