@@ -796,6 +796,33 @@ git commit -m "docs(readme): add installation instructions for Windows"
 git commit -m "chore(deps): update selenium to 4.18.0"
 ```
 
+#### Commit Message Rules (IMPORTANT)
+**Keep commits SHORT and CONCISE:**
+- ✅ Brief subject line (50-70 characters)
+- ✅ Short description (2-4 lines) summarizing changes since last commit
+- ✅ Subtle co-authorship: Just add "Co-Authored-By: Claude <noreply@anthropic.com>" at end
+- ❌ NO long explanations or detailed technical descriptions
+- ❌ NO verbose multi-paragraph commits
+
+**Example - Good (Short):**
+```bash
+git commit -m "feat(mermaid): integrate diagram support from phase-2
+
+Added MermaidAgent class with multi-strategy rendering.
+Supports flowcharts, sequence, and class diagrams.
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+**Example - Bad (Too Long):**
+```bash
+git commit -m "feat(mermaid): comprehensive implementation with detailed...
+[50+ lines of explanation, code snippets, technical details]
+This is too verbose and should be in documentation instead."
+```
+
+**Rule:** Documentation goes in .md files, commits are just change summaries.
+
 #### Commit Types
 - `feat`: New feature
 - `fix`: Bug fix

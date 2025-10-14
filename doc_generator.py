@@ -50,6 +50,13 @@ from webdriver_manager.firefox import GeckoDriverManager
 # without code changes. Critical for security and multi-project usage.
 load_dotenv()
 
+# Mermaid diagram support
+try:
+    import subprocess
+    MERMAID_CLI_AVAILABLE = True
+except ImportError:
+    MERMAID_CLI_AVAILABLE = False
+
 
 @dataclass
 class DocumentSection:
@@ -83,6 +90,7 @@ class DocumentSection:
     content: str = ""
     images: List[Dict[str, str]] = field(default_factory=list)
     code_blocks: List[str] = field(default_factory=list)
+    mermaid_diagrams: List[Dict[str, str]] = field(default_factory=list)  # {"description": str, "code": str, "path": str}
 
 
 @dataclass
@@ -734,6 +742,176 @@ class ScreenshotAgent:
             return str(screenshot_path)
         except Exception as e:
             print(f"    ✗ Failed to capture {url}: {e}")
+            return None
+
+
+class MermaidAgent:
+    """Handles Mermaid diagram generation for architecture visualization.
+
+    This agent generates Mermaid diagrams to visualize:
+    - System architecture (component diagrams)
+    - Data flow (flowcharts, sequence diagrams)
+    - Class hierarchies (class diagrams)
+    - State machines (state diagrams)
+    - Database schemas (ER diagrams)
+
+    Why Mermaid:
+    - Text-based diagram format (version control friendly)
+    - Wide support (GitHub, GitLab, documentation tools)
+    - Multiple diagram types (flowchart, sequence, class, state, ER, etc.)
+    - Can be rendered to PNG/SVG for Word documents
+
+    Rendering options:
+    1. mermaid-cli (mmdc) - Node.js based, best quality
+    2. Online API (mermaid.ink) - No installation required
+    3. Fallback: Include Mermaid code as formatted text
+    """
+
+    def __init__(self):
+        """Initialize Mermaid diagram generator."""
+        self.diagrams_dir = Path(os.getenv('MERMAID_DIAGRAMS_DIRECTORY', './mermaid_diagrams'))
+        self.diagrams_dir.mkdir(exist_ok=True, parents=True)
+        self.use_mermaid = os.getenv('ENABLE_MERMAID_DIAGRAMS', 'true').lower() == 'true'
+
+        # Check if mermaid-cli is installed
+        self.mmdc_available = self._check_mmdc_available()
+
+        print(f"✓ Mermaid diagrams directory: {self.diagrams_dir.absolute()}")
+        if self.mmdc_available:
+            print("✓ mermaid-cli (mmdc) is available")
+        else:
+            print("⚠️  mermaid-cli not found, will use fallback rendering")
+
+    def _check_mmdc_available(self) -> bool:
+        """Check if mermaid-cli (mmdc command) is available."""
+        try:
+            result = subprocess.run(['mmdc', '--version'],
+                                   capture_output=True,
+                                   timeout=5)
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    def generate_diagram_code(self, gemini_agent, context: str, diagram_type: str,
+                              description: str) -> Optional[str]:
+        """Generate Mermaid diagram code using Gemini AI.
+
+        Args:
+            gemini_agent: GeminiDocAgent instance for API calls
+            context: Project context for understanding architecture
+            diagram_type: Type of diagram (flowchart, sequence, class, etc.)
+            description: What the diagram should show
+
+        Returns:
+            str: Mermaid diagram code, or None if generation fails
+        """
+        prompt = f"""Generate a Mermaid diagram for technical documentation.
+
+Diagram Type: {diagram_type}
+Description: {description}
+
+Project Context:
+{context[:50000]}
+
+Generate ONLY the Mermaid diagram code (no markdown code blocks, no explanations).
+Start directly with the diagram type (e.g., 'graph TD', 'sequenceDiagram', 'classDiagram').
+
+For {diagram_type}:
+- Make it clear and readable
+- Include relevant components/functions from the codebase
+- Use proper Mermaid syntax
+- Keep it focused (5-15 nodes maximum)
+- Use descriptive labels
+
+Return ONLY the Mermaid code."""
+
+        try:
+            response = gemini_agent._make_request(prompt)
+
+            # Clean up response
+            response = response.strip()
+            # Remove markdown code blocks if present
+            if response.startswith('```mermaid'):
+                lines = response.split('\n')
+                response = '\n'.join(lines[1:-1] if lines[-1].strip() == '```' else lines[1:])
+            response = response.replace('```mermaid', '').replace('```', '').strip()
+
+            return response
+        except Exception as e:
+            print(f"⚠️  Failed to generate Mermaid diagram: {e}")
+            return None
+
+    def render_diagram(self, mermaid_code: str, output_name: str) -> Optional[str]:
+        """Render Mermaid code to PNG image.
+
+        Args:
+            mermaid_code: Mermaid diagram code
+            output_name: Output filename (without extension)
+
+        Returns:
+            str: Path to generated PNG file, or None if rendering fails
+        """
+        output_path = self.diagrams_dir / f"{output_name}.png"
+
+        # Strategy 1: Use mermaid-cli (mmdc) if available
+        if self.mmdc_available:
+            try:
+                # Save Mermaid code to temporary file
+                temp_mmd = self.diagrams_dir / f"{output_name}.mmd"
+                with open(temp_mmd, 'w', encoding='utf-8') as f:
+                    f.write(mermaid_code)
+
+                # Render using mmdc
+                cmd = [
+                    'mmdc',
+                    '-i', str(temp_mmd),
+                    '-o', str(output_path),
+                    '-b', 'transparent',  # Transparent background
+                    '-t', 'default',  # Theme
+                    '-w', '1200',  # Width
+                    '-H', '800'  # Height
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+                if result.returncode == 0 and output_path.exists():
+                    print(f"    ✓ Rendered: {output_name}")
+                    # Clean up temp file
+                    temp_mmd.unlink()
+                    return str(output_path)
+                else:
+                    print(f"    ⚠️  mmdc failed: {result.stderr[:200]}")
+            except Exception as e:
+                print(f"    ⚠️  Rendering error: {e}")
+
+        # Strategy 2: Use mermaid.ink online service
+        try:
+            import base64
+            import urllib.request
+            import urllib.parse
+
+            # Encode Mermaid code
+            encoded = base64.urlsafe_b64encode(mermaid_code.encode('utf-8')).decode('ascii')
+            url = f"https://mermaid.ink/img/{encoded}"
+
+            # Download rendered image
+            urllib.request.urlretrieve(url, output_path)
+
+            if output_path.exists() and output_path.stat().st_size > 0:
+                print(f"    ✓ Rendered via mermaid.ink: {output_name}")
+                return str(output_path)
+        except Exception as e:
+            print(f"    ⚠️  mermaid.ink rendering failed: {e}")
+
+        # Strategy 3: Save Mermaid code as text file (fallback)
+        try:
+            text_path = self.diagrams_dir / f"{output_name}.txt"
+            with open(text_path, 'w', encoding='utf-8') as f:
+                f.write(f"Mermaid Diagram Code:\n\n{mermaid_code}")
+            print(f"    ℹ️  Saved Mermaid code to: {text_path}")
+            return None  # No image available
+        except Exception as e:
+            print(f"    ⚠️  Failed to save Mermaid code: {e}")
             return None
 
 
