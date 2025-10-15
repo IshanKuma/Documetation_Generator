@@ -696,7 +696,14 @@ class ScreenshotAgent:
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
-            service = ChromeService(ChromeDriverManager().install())
+
+            # Use system ChromeDriver if available (Docker), otherwise download
+            chromedriver_path = os.getenv('CHROMEDRIVER_PATH')
+            if chromedriver_path and os.path.exists(chromedriver_path):
+                service = ChromeService(executable_path=chromedriver_path)
+            else:
+                service = ChromeService(ChromeDriverManager().install())
+
             return webdriver.Chrome(service=service, options=options)
         
         elif self.browser == "firefox":
