@@ -19,14 +19,19 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies for Chrome/Chromium, screenshots, and diagram generation
 # Why these packages:
 # - chromium: Headless browser for screenshots (lighter than full Chrome)
-# - chromium-driver: Selenium WebDriver for Chromium
 # - fonts-liberation: Better font rendering in screenshots
 # - nodejs, npm: Required for mermaid-cli diagram rendering
 # - libreoffice-writer: For PDF export on Linux
 # - wget, gnupg: For package management
+#
+# VERSION MATCHING STRATEGY:
+# We install ONLY chromium from apt (NOT chromium-driver) to avoid version mismatches.
+# The ChromeDriver is managed by webdriver-manager (Python package in requirements.txt),
+# which automatically downloads the correct ChromeDriver version matching the installed
+# Chromium browser version. This ensures compatibility across different base images and
+# Chromium versions without manual intervention.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
-    chromium-driver \
     fonts-liberation \
     fonts-dejavu-core \
     nodejs \
@@ -42,8 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @mermaid-js/mermaid-cli
 
 # Set Chromium path for Selenium
-ENV CHROME_BIN=/usr/bin/chromium \
-    CHROMEDRIVER_PATH=/usr/bin/chromedriver
+# Note: CHROMEDRIVER_PATH is NOT set here because webdriver-manager
+# dynamically downloads and manages the ChromeDriver in ~/.wdm/
+# This ensures the driver version always matches the Chromium version
+ENV CHROME_BIN=/usr/bin/chromium
 
 # Create app directory
 WORKDIR /app
