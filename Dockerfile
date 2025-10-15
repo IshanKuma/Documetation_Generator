@@ -82,5 +82,6 @@ USER docgen
 # - /app/screenshots: Captured screenshots
 # - /app/project: Source code to document (mounted from host)
 
-# Default command
-CMD ["python", "doc_generator.py"]
+# Default command: Use wrapper script for better error handling
+# and completion detection (creates .complete marker file)
+CMD ["python", "run_doc_generator.py"]
