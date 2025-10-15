@@ -19,8 +19,13 @@ services:
     # Container name
     container_name: documentation-generator
 
-    # Restart policy
-    restart: unless-stopped
+    # Restart policy: Run once and stop when complete
+    # ==========================================
+    # DO NOT use 'unless-stopped' - it causes infinite restart loops
+    # The container should complete the documentation generation task
+    # and exit cleanly. No restart needed.
+    # To run again, use: docker-compose up (or docker-compose start)
+    restart: "no"
 
     # Environment Variables
     # ==========================================
@@ -178,3 +183,38 @@ services:
 # networks:
 #   doc-generator-network:
 #     driver: bridge
+
+# ==========================================
+# How to Run the Documentation Generator
+# ==========================================
+#
+# BASIC USAGE:
+# 1. Edit the environment variables above (especially GEMINI_API_KEY, PROJECT_PATH, PROJECT_NAME)
+# 2. Run: docker-compose up
+# 3. Wait for completion (container will stop automatically)
+# 4. Find generated documentation in ./output directory
+#
+# IMPORTANT:
+# - DO NOT use 'docker-compose up -d' (detached mode) as you won't see progress
+# - Use 'docker-compose up' to see real-time generation logs
+# - Container will exit automatically when documentation is complete
+# - Check exit code: 0 = success, 1 = failure
+#
+# HOW TO KNOW WHEN COMPLETE:
+# - Container will stop automatically
+# - You'll see "Documentation generation complete!" in logs
+# - Check ./output/.complete file exists (completion marker)
+# - Exit code 0 means success
+#
+# USEFUL COMMANDS:
+# - docker-compose up           # Run container and view logs
+# - docker-compose logs         # View logs from previous run
+# - docker-compose down         # Remove container
+# - docker-compose build        # Rebuild image after code changes
+# - ls -la ./output             # Check generated files
+#
+# TROUBLESHOOTING:
+# - If container exits immediately, check: docker-compose logs
+# - If stuck in restart loop, verify restart: "no" is set above
+# - If no output files, check GEMINI_API_KEY is valid
+# - If permission errors, check volume mount paths exist

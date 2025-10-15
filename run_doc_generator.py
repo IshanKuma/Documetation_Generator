@@ -23,6 +23,7 @@ Last Updated: 2025-10-09
 from dotenv import load_dotenv
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -411,7 +412,20 @@ def main() -> int:
         
         # Run the generation pipeline
         output_path = generator.generate()
-        
+
+        # Create completion marker file to signal successful completion
+        # This is especially useful in Docker containers to detect when generation is done
+        output_dir = Path(os.getenv('OUTPUT_DIRECTORY', './output'))
+        completion_marker = output_dir / '.complete'
+        try:
+            with open(completion_marker, 'w') as f:
+                f.write(f"Documentation generation completed successfully\n")
+                f.write(f"Generated: {output_path}\n")
+                f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            print(f"\n✓ Completion marker created: {completion_marker}")
+        except Exception as e:
+            print(f"⚠️  Could not create completion marker: {e}")
+
         # Success!
         return 0
         
