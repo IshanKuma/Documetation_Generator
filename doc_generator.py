@@ -178,7 +178,24 @@ class GeminiDocAgent:
         self.model_name = os.getenv('GEMINI_MODEL', 'gemini-2.5-pro')
         self.temperature = float(os.getenv('GEMINI_TEMPERATURE', '0.7'))
         self.max_tokens = int(os.getenv('GEMINI_MAX_OUTPUT_TOKENS', '8000'))
-        self.request_delay = int(os.getenv('GEMINI_REQUEST_DELAY', '2'))
+
+        # Rate limiting configuration with safer defaults
+        # Default 5 seconds = 12 req/min (safely under 15 req/min free tier limit)
+        self.request_delay = int(os.getenv('GEMINI_REQUEST_DELAY', '5'))
+
+        # Specific delays for different request types (all default to base delay if not set)
+        self.plan_request_delay = int(os.getenv('GEMINI_PLAN_REQUEST_DELAY', str(self.request_delay)))
+        self.section_request_delay = int(os.getenv('GEMINI_SECTION_REQUEST_DELAY', str(self.request_delay)))
+        self.screenshot_request_delay = int(os.getenv('GEMINI_SCREENSHOT_REQUEST_DELAY', str(self.request_delay)))
+        self.diagram_request_delay = int(os.getenv('GEMINI_DIAGRAM_REQUEST_DELAY', str(self.request_delay)))
+
+        # Request tracking for per-minute rate limiting
+        self.request_timestamps = []  # List of timestamps for recent requests
+        self.max_requests_per_minute = int(os.getenv('GEMINI_MAX_REQUESTS_PER_MINUTE', '15'))
+
+        # Exponential backoff configuration
+        self.max_retries = int(os.getenv('GEMINI_MAX_RETRIES', '3'))
+        self.base_backoff_delay = int(os.getenv('GEMINI_BASE_BACKOFF_DELAY', '5'))
 
         # Initialize the model with generation parameters
         # Why these settings:
@@ -193,24 +210,54 @@ class GeminiDocAgent:
         )
 
         print(f"✓ Initialized Gemini model: {self.model_name}")
+        print(f"✓ Rate limiting: {self.request_delay}s base delay, max {self.max_requests_per_minute} req/min")
     
-    def _make_request(self, prompt: str, delay: bool = True, json_mode: bool = False) -> str:
-        """Make a request to Gemini API with rate limiting and error handling.
+    def _track_request(self):
+        """Track request timestamp and enforce per-minute rate limit.
 
-        Why rate limiting:
-        - Free tier has 15 requests/minute limit
-        - Exceeding limits causes 429 errors and delays generation
-        - 2-second delay = ~30 req/min buffer, safer than theoretical 4 seconds
+        Removes timestamps older than 60 seconds and checks if we're at the limit.
+        If at limit, waits until oldest request expires.
+        """
+        current_time = time.time()
 
-        Why retry logic:
-        - Gemini API occasionally has transient failures (network, server)
-        - Single retry with 5s delay handles 99% of temporary issues
-        - Prevents entire documentation generation from failing due to one hiccup
+        # Remove timestamps older than 60 seconds
+        self.request_timestamps = [ts for ts in self.request_timestamps if current_time - ts < 60]
 
-        Why json_mode parameter:
-        - Gemini sometimes returns prose instead of JSON despite prompt instructions
-        - Setting response_mime_type='application/json' forces JSON output
-        - Critical for documentation plan parsing to avoid fallback to 3 sections
+        # Check if we're at the request limit
+        if len(self.request_timestamps) >= self.max_requests_per_minute:
+            # Calculate how long to wait until the oldest request expires
+            oldest_timestamp = self.request_timestamps[0]
+            wait_time = 60 - (current_time - oldest_timestamp) + 1  # +1 for safety margin
+            if wait_time > 0:
+                print(f"⏳ Rate limit approaching ({len(self.request_timestamps)}/{self.max_requests_per_minute} req/min). Waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+                # Recalculate current time after waiting
+                current_time = time.time()
+                # Remove expired timestamps again
+                self.request_timestamps = [ts for ts in self.request_timestamps if current_time - ts < 60]
+
+        # Add current request timestamp
+        self.request_timestamps.append(current_time)
+
+    def _make_request(self, prompt: str, delay: bool = True, json_mode: bool = False, request_type: str = 'default') -> str:
+        """Make a request to Gemini API with intelligent rate limiting and exponential backoff.
+
+        Enhanced rate limiting features:
+        - Per-minute request tracking to stay under 15 req/min limit
+        - Type-specific delays for different request types
+        - Exponential backoff on 429 rate limit errors
+        - Configurable retry logic with increasing delays
+
+        Why intelligent rate limiting:
+        - Free tier: 15 req/min, 1,500 req/day, 1M tokens/min input, 32K tokens/min output
+        - Default 5s delay = 12 req/min (safe margin under 15 req/min)
+        - Different request types can have custom delays (e.g., slower for plans, faster for sections)
+        - Request tracking prevents bursts from exceeding limits
+
+        Why exponential backoff:
+        - 429 errors indicate we hit rate limits despite tracking
+        - Exponential backoff (5s, 10s, 20s) gives API time to recover
+        - Prevents cascading failures and wasted retry attempts
 
         Args:
             prompt (str): The prompt to send to Gemini
@@ -219,53 +266,88 @@ class GeminiDocAgent:
                          unnecessary wait.
             json_mode (bool): Whether to force JSON response format.
                             Set to True when expecting structured JSON output.
+            request_type (str): Type of request for custom delays.
+                              Options: 'plan', 'section', 'screenshot', 'diagram', 'default'
 
         Returns:
             str: The generated text response from Gemini
 
         Raises:
-            Exception: If API fails even after retry (re-raises last exception)
+            Exception: If API fails after all retries (re-raises last exception)
 
-        Note:
-            This is a simple retry strategy. For production, consider exponential
-            backoff or circuit breaker pattern for better resilience.
+        Example:
+            # Plan creation with custom delay
+            response = agent._make_request(prompt, delay=False, json_mode=True, request_type='plan')
+
+            # Section content with standard delay
+            response = agent._make_request(prompt, request_type='section')
         """
+        # Select appropriate delay based on request type
+        delay_time = self.request_delay  # default
+        if request_type == 'plan':
+            delay_time = self.plan_request_delay
+        elif request_type == 'section':
+            delay_time = self.section_request_delay
+        elif request_type == 'screenshot':
+            delay_time = self.screenshot_request_delay
+        elif request_type == 'diagram':
+            delay_time = self.diagram_request_delay
+
         # Rate limiting: Wait before making request to respect API limits
-        # Why check delay flag: First request of session shouldn't wait unnecessarily
         if delay:
-            time.sleep(self.request_delay)
+            time.sleep(delay_time)
+
+        # Track this request for per-minute rate limiting
+        self._track_request()
 
         # Build generation configuration
-        # Base settings: temperature and max tokens from environment
         generation_config = {
             'temperature': self.temperature,
             'max_output_tokens': self.max_tokens,
         }
 
         # Force JSON mode for structured outputs (documentation plans)
-        # This prevents Gemini from returning prose instead of JSON
         if json_mode:
             generation_config['response_mime_type'] = 'application/json'
 
-        try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=generation_config
-            )
-            return response.text
-        except Exception as e:
-            # Error handling: Common issues include rate limits, network errors,
-            # and occasional Gemini API hiccups. A single retry fixes most cases.
-            print(f"⚠️  Gemini API error: {e}")
-            print("Retrying in 5 seconds...")
-            time.sleep(5)  # Wait longer on error (possible rate limit issue)
+        # Exponential backoff retry logic
+        last_exception = None
+        for retry_attempt in range(self.max_retries):
+            try:
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config
+                )
+                return response.text
 
-            # Retry once without additional error handling (let it fail if persistent)
-            response = self.model.generate_content(
-                prompt,
-                generation_config=generation_config
-            )
-            return response.text
+            except Exception as e:
+                last_exception = e
+                error_str = str(e).lower()
+
+                # Check if this is a rate limit error (429)
+                is_rate_limit_error = '429' in error_str or 'quota' in error_str or 'rate limit' in error_str
+
+                if retry_attempt < self.max_retries - 1:
+                    # Calculate exponential backoff delay
+                    if is_rate_limit_error:
+                        # Longer backoff for rate limit errors
+                        backoff_delay = self.base_backoff_delay * (2 ** retry_attempt)
+                        print(f"⚠️  Rate limit error (429): {e}")
+                        print(f"   Attempt {retry_attempt + 1}/{self.max_retries}. Backing off for {backoff_delay}s...")
+                    else:
+                        # Standard backoff for other errors
+                        backoff_delay = self.base_backoff_delay
+                        print(f"⚠️  Gemini API error: {e}")
+                        print(f"   Attempt {retry_attempt + 1}/{self.max_retries}. Retrying in {backoff_delay}s...")
+
+                    time.sleep(backoff_delay)
+                else:
+                    # Final attempt failed
+                    print(f"❌ All {self.max_retries} retry attempts failed")
+                    raise last_exception
+
+        # Should not reach here, but just in case
+        raise last_exception
     
     def create_documentation_plan(self, context: str, project_name: str) -> DocumentationPlan:
         """Analyze codebase and create structured documentation outline (Phase 2).
@@ -348,7 +430,8 @@ Return ONLY the JSON object, nothing else."""
         # Make API request with JSON mode enabled
         # json_mode=True forces Gemini to return valid JSON instead of prose
         # delay=False because this is typically the first request in the pipeline
-        response = self._make_request(prompt, delay=False, json_mode=True)
+        # request_type='plan' uses plan-specific delay configuration
+        response = self._make_request(prompt, delay=False, json_mode=True, request_type='plan')
 
         # JSON cleanup: Gemini API quirk
         # Problem: Despite json_mode and "return ONLY JSON" in prompt, Gemini occasionally
@@ -483,7 +566,7 @@ AVOID:
 
 Generate ONLY the section content. No preamble, no explanations about the content."""
 
-        content = self._make_request(prompt)
+        content = self._make_request(prompt, request_type='section')
         
         # Extract code blocks
         section.code_blocks = self._extract_code_blocks(content)
@@ -549,7 +632,7 @@ Return ONLY a JSON array (no markdown, no code blocks):
 
 Return only valid JSON."""
 
-        response = self._make_request(prompt, json_mode=True)
+        response = self._make_request(prompt, json_mode=True, request_type='screenshot')
 
         # Clean response (remove markdown code blocks if present)
         response = response.strip()
@@ -869,7 +952,7 @@ For {diagram_type}:
 Return ONLY the Mermaid code."""
 
         try:
-            response = gemini_agent._make_request(prompt)
+            response = gemini_agent._make_request(prompt, request_type='diagram')
 
             # Clean up response
             response = response.strip()
