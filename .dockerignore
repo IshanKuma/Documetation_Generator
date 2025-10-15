@@ -30,6 +30,7 @@ build/
 # These are generated at runtime, don't need in image
 output/
 screenshots/
+mermaid_diagrams/
 *.docx
 *.pdf
 *.png
@@ -43,6 +44,8 @@ screenshots/
 *.md
 !README.md
 docs/
+DOCKER_SETUP.md
+IMPLEMENTATION_STATUS.md
 
 # ==========================================
 # Git and Version Control
@@ -128,6 +131,18 @@ repomix-output.txt
 !pom.xml
 
 # ==========================================
+# Archives and Compressed Files
+# ==========================================
+# Docker images, backups, and large archives
+*.tar.gz
+*.tar
+*.zip
+*.gz
+*.bz2
+*.7z
+*.rar
+
+# ==========================================
 # Node Modules (if any JS tooling exists)
 # ==========================================
 node_modules/
@@ -155,3 +170,5 @@ setup_guide_gemini.md
 system_diagram.mermaid
 CONTRIBUTING.md
 GIT_REFERENCE.md
+test_json_fix.py
+test_*.py

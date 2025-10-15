@@ -540,15 +540,41 @@ Return ONLY the JSON object, nothing else."""
                 ]
             }
 
+        # Create section list
+        sections = [DocumentSection(
+            title=s["title"],
+            level=s["level"],
+            content="",
+            images=[{"description": desc, "path": ""} for desc in s.get("image_descriptions", [])],
+            code_blocks=[]
+        ) for s in plan_json["sections"]]
+
+        # CRITICAL: Enforce MAX_SECTIONS limit
+        # AI sometimes returns more sections than requested, so we enforce the limit here
+        if len(sections) > max_sections:
+            print(f"   ⚠️  AI generated {len(sections)} sections, but MAX_SECTIONS={max_sections}")
+            print(f"   Trimming to {max_sections} sections...")
+            sections = sections[:max_sections]
+
+        # FORCE image placeholders for priority sections if AI didn't add them
+        # Priority keywords for screenshots
+        priority_keywords = os.getenv('SCREENSHOT_PRIORITY_SECTIONS',
+                                     'installation,configuration,architecture,usage').lower().split(',')
+        priority_keywords = [k.strip() for k in priority_keywords]
+
+        for section in sections:
+            section_title_lower = section.title.lower()
+            is_priority = any(keyword in section_title_lower for keyword in priority_keywords)
+
+            # If this is a priority section but has no images, add placeholder
+            if is_priority and not section.images:
+                # Add generic image placeholder for this section
+                section.images = [{"description": f"{section.title} overview", "path": ""}]
+                print(f"   + Added image placeholder for priority section: {section.title}")
+
         return DocumentationPlan(
             title=plan_json["title"],
-            sections=[DocumentSection(
-                title=s["title"],
-                level=s["level"],
-                content="",
-                images=[{"description": desc, "path": ""} for desc in s.get("image_descriptions", [])],
-                code_blocks=[]
-            ) for s in plan_json["sections"]]
+            sections=sections
         )
     
     def generate_section_content(self, section: DocumentSection, context: str, 
@@ -960,7 +986,7 @@ class MermaidAgent:
         Returns:
             str: Mermaid diagram code, or None if generation fails
         """
-        prompt = f"""Generate a Mermaid diagram for technical documentation.
+        prompt = f"""Generate a SIMPLE and CONCISE Mermaid diagram for technical documentation.
 
 Diagram Type: {diagram_type}
 Description: {description}
@@ -971,12 +997,24 @@ Project Context:
 Generate ONLY the Mermaid diagram code (no markdown code blocks, no explanations).
 Start directly with the diagram type (e.g., 'graph TD', 'sequenceDiagram', 'classDiagram').
 
+CRITICAL REQUIREMENTS:
+- MAXIMUM 8-10 nodes/components (keep it simple!)
+- Use SHORT labels (max 3-4 words per node)
+- Focus on HIGH-LEVEL architecture only
+- Avoid detailed implementation
+- Keep syntax minimal
+
 For {diagram_type}:
 - Make it clear and readable
-- Include relevant components/functions from the codebase
+- Include only KEY components from the codebase
 - Use proper Mermaid syntax
-- Keep it focused (5-15 nodes maximum)
-- Use descriptive labels
+- Keep labels SHORT
+
+Example GOOD diagram:
+graph TD
+    A[Client] --> B[API Gateway]
+    B --> C[Auth Service]
+    B --> D[Database]
 
 Return ONLY the Mermaid code."""
 
@@ -1040,23 +1078,27 @@ Return ONLY the Mermaid code."""
                 print(f"    ⚠️  Rendering error: {e}")
 
         # Strategy 2: Use mermaid.ink online service
-        try:
-            import base64
-            import urllib.request
-            import urllib.parse
+        # Skip if code is too long (>2000 chars causes URI Too Long error)
+        if len(mermaid_code) < 2000:
+            try:
+                import base64
+                import urllib.request
+                import urllib.parse
 
-            # Encode Mermaid code
-            encoded = base64.urlsafe_b64encode(mermaid_code.encode('utf-8')).decode('ascii')
-            url = f"https://mermaid.ink/img/{encoded}"
+                # Encode Mermaid code
+                encoded = base64.urlsafe_b64encode(mermaid_code.encode('utf-8')).decode('ascii')
+                url = f"https://mermaid.ink/img/{encoded}"
 
-            # Download rendered image
-            urllib.request.urlretrieve(url, output_path)
+                # Download rendered image
+                urllib.request.urlretrieve(url, output_path)
 
-            if output_path.exists() and output_path.stat().st_size > 0:
-                print(f"    ✓ Rendered via mermaid.ink: {output_name}")
-                return str(output_path)
-        except Exception as e:
-            print(f"    ⚠️  mermaid.ink rendering failed: {e}")
+                if output_path.exists() and output_path.stat().st_size > 0:
+                    print(f"    ✓ Rendered via mermaid.ink: {output_name}")
+                    return str(output_path)
+            except Exception as e:
+                print(f"    ⚠️  mermaid.ink rendering failed: {e}")
+        else:
+            print(f"    ⚠️  Mermaid code too large ({len(mermaid_code)} chars) for mermaid.ink, skipping online render")
 
         # Strategy 3: Save Mermaid code as text file (fallback)
         try:

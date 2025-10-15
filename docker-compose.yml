@@ -8,13 +8,17 @@ version: '3.8'
 
 services:
   doc-generator:
-    # Image name (uses existing image if available, builds if not)
-    image: documentation_generator-doc-generator:latest
+    # Image name with version tag
+    # Version 1.2.2: Autonomous agent - no interactive prompts, smart repomix resolution
+    image: documentation_generator:1.2.4
 
     # Build configuration (optional - only used if image doesn't exist)
     build:
       context: .
       dockerfile: Dockerfile
+      tags:
+        - documentation_generator:1.2.4
+        - documentation_generator:latest
 
     # Container name
     container_name: documentation-generator
@@ -36,19 +40,39 @@ services:
       # Google Gemini API Configuration
       # ==========================================
       # Get your free API key from: https://aistudio.google.com/apikey
-      - GEMINI_API_KEY=your_gemini_api_key_here
-      - GEMINI_MODEL=gemini-2.5-pro
+      - GEMINI_API_KEY=AIzaSyD39IFvm8NciQPZHzSsgnM34iPgIFrIdAI
+      - GEMINI_MODEL=gemini-2.5-flash-lite
       - GEMINI_TEMPERATURE=0.7
       - GEMINI_MAX_OUTPUT_TOKENS=8000
-      - GEMINI_REQUEST_DELAY=2
+
+      # Rate Limiting Configuration
+      # Gemini 2.5 Flash-Lite free tier: 15 requests per minute (RPM)
+      # 5s delay = 12 req/min (80% utilization, safely under 15 RPM limit)
+      # Flash-Lite is optimized for speed and high throughput
+      - GEMINI_REQUEST_DELAY=5
+
+      # Type-specific delays (optional - defaults to GEMINI_REQUEST_DELAY if not set)
+      # All delays set to 5s for consistent throughput
+      - GEMINI_PLAN_REQUEST_DELAY=5
+      - GEMINI_SECTION_REQUEST_DELAY=5
+      - GEMINI_SCREENSHOT_REQUEST_DELAY=5
+      - GEMINI_DIAGRAM_REQUEST_DELAY=5
+
+      # Rate limit enforcement (15 RPM for Flash-Lite free tier)
+      # Note: 1,000 requests per day limit, 250K tokens/min
+      - GEMINI_MAX_REQUESTS_PER_MINUTE=15
+
+      # Exponential backoff configuration for retries
+      - GEMINI_MAX_RETRIES=3
+      - GEMINI_BASE_BACKOFF_DELAY=5
 
       # ==========================================
       # Project Configuration
       # ==========================================
       # PROJECT_PATH should point to the mounted project directory in the container
-      - PROJECT_NAME=Your Project Name
+      - "PROJECT_NAME=Arise Mapview: FastAPI App"
       - PROJECT_PATH=/app/project
-      - PROJECT_DESCRIPTION=Brief description of your project
+      - "PROJECT_DESCRIPTION=Comprehensive FastAPI backend for managing industrial plots and zones across multiple African countries with JWT authentication, role-based access control, and Firebase Firestore integration"
 
       # ==========================================
       # Repomix Configuration (Optional)
@@ -74,22 +98,40 @@ services:
       - BROWSER_CHOICE=chrome
       - SCREENSHOT_WAIT_TIME=3
 
+      # Screenshot Optimization
+      - MAX_SCREENSHOTS_PER_DOCUMENT=8
+      - SCREENSHOT_PRIORITY_SECTIONS=installation,configuration,architecture,usage
+
       # ==========================================
       # Mermaid Diagram Configuration
       # ==========================================
       # Enable AI-generated architecture diagrams (flowcharts, sequence diagrams, etc.)
       - ENABLE_MERMAID_DIAGRAMS=true
       - MERMAID_DIAGRAMS_DIRECTORY=/app/mermaid_diagrams
+      - MAX_MERMAID_DIAGRAMS=3
 
       # ==========================================
       # Live Application Screenshots (Optional)
       # ==========================================
       # Enable to capture screenshots of running applications
       # Useful for web apps, APIs, dashboards
+      #
+      # IMPORTANT: Docker networking considerations:
+      # - 127.0.0.1 inside container refers to the CONTAINER, not your host machine
+      # - To access host services from Docker:
+      #   * Mac/Windows: Use host.docker.internal instead of 127.0.0.1
+      #   * Linux: Use network_mode: host (uncomment below) OR use host's actual IP
+      #
+      # Example for Mac/Windows:
+      #   - LIVE_APP_URL_HOME=http://host.docker.internal:8000
+      #
+      # Example for Linux with network_mode: host:
+      #   - LIVE_APP_URL_HOME=http://127.0.0.1:8000  (requires network_mode: host below)
+      #
       - LIVE_APP_ENABLED=false
-      - LIVE_APP_URL_HOME=http://host.docker.internal:3000
-      - LIVE_APP_URL_DASHBOARD=http://host.docker.internal:3000/dashboard
-      - LIVE_APP_URL_API_DOCS=http://host.docker.internal:8000/docs
+      - LIVE_APP_URL_HOME=http://host.docker.internal:8000
+      - LIVE_APP_URL_DASHBOARD=http://host.docker.internal:8000/docs
+      - LIVE_APP_URL_API_DOCS=http://host.docker.internal:8000/redoc
 
       # ==========================================
       # Documentation Sections Control
@@ -102,6 +144,10 @@ services:
       - INCLUDE_DEVELOPMENT_GUIDE=true
       - INCLUDE_TROUBLESHOOTING=true
       - INCLUDE_DEPLOYMENT=false
+
+      # Section Count Optimization
+      - MIN_SECTIONS=9
+      - MAX_SECTIONS=15
 
       # ==========================================
       # Advanced Settings
@@ -139,7 +185,7 @@ services:
       #   - /path/to/your/project:/app/project          (Linux/macOS)
       #   - C:/Users/YourName/Projects/myapp:/app/project (Windows)
       # For testing this tool itself, use:
-      - .:/app/project
+      - /home/user/Desktop/arise_fastapi:/app/project
 
     # Resource Limits (Optional)
     # ==========================================
@@ -155,7 +201,13 @@ services:
 
     # Network Configuration
     # ==========================================
-    # Use host network if you need to capture screenshots of apps running on localhost
+    # IMPORTANT: Uncomment network_mode: host if:
+    # 1. You're on Linux AND
+    # 2. You want to capture screenshots of apps running on localhost (127.0.0.1)
+    #
+    # Note: network_mode: host works best on Linux. On Mac/Windows, use host.docker.internal instead.
+    # When using host network mode, container shares host's network stack (no port mapping needed)
+    #
     # network_mode: host
 
     # Healthcheck (Optional)
