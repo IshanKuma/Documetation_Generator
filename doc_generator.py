@@ -267,7 +267,8 @@ class GeminiDocAgent:
             )
             return response.text
     
-    def create_documentation_plan(self, context: str, project_name: str) -> DocumentationPlan:
+    def create_documentation_plan(self, context: str, project_name: str,
+                                  min_sections: int = 9, max_sections: int = 15) -> DocumentationPlan:
         """Analyze codebase and create structured documentation outline (Phase 2).
 
         This is the first AI interaction in the pipeline. Gemini analyzes the entire
@@ -288,6 +289,8 @@ class GeminiDocAgent:
         Args:
             context (str): Full codebase text (from repomix or directory scan)
             project_name (str): Human-readable project name for documentation
+            min_sections (int): Minimum number of sections to generate
+            max_sections (int): Maximum number of sections to generate
 
         Returns:
             DocumentationPlan: Structured plan with title and sections
@@ -304,6 +307,19 @@ class GeminiDocAgent:
         # Performance consideration: Larger context = better AI understanding but
         # slower processing and higher risk of hitting token limits
         context = context[:100000]
+
+        # Determine section count based on project size
+        context_size = len(context)
+        if context_size < 30000:
+            # Small project: fewer sections
+            actual_min_sections = max(5, min_sections - 4)
+            actual_max_sections = max(9, max_sections - 6)
+            section_guidance = f"This is a small project. Create {actual_min_sections}-{actual_max_sections} sections total"
+        else:
+            # Normal/large project: standard range
+            actual_min_sections = min_sections
+            actual_max_sections = max_sections
+            section_guidance = f"Create {actual_min_sections}-{actual_max_sections} sections total"
         
         prompt = f"""You are a technical documentation expert. Analyze this codebase and create a comprehensive documentation plan.
 
@@ -332,16 +348,22 @@ CRITICAL REQUIREMENTS:
 3. Do NOT wrap this in "documentation_plan", "plan", or any other outer key
 4. Each section MUST have: "title" (string), "level" (1 or 2), "needs_images" (boolean), "image_descriptions" (array)
 
-Include these sections (create 9-12 sections total):
+{section_guidance}. Choose the appropriate sections based on project complexity:
+
+Core sections (always include):
 1. Overview/Introduction (level 1)
-2. Architecture & Design (level 1) - with 2-3 level 2 subsections
-3. Installation & Setup (level 1)
-4. Core Components (level 1) - with 2-4 level 2 subsections for major components
-5. Configuration (level 1)
-6. Usage Guide (level 1) - with 2-3 level 2 subsections
+2. Installation & Setup (level 1)
+3. Usage Guide (level 1) - with subsections if needed
+
+Additional sections (include based on project needs and size):
+4. Architecture & Design (level 1) - with 2-3 level 2 subsections for larger projects
+5. Core Components (level 1) - with 2-4 level 2 subsections for major components
+6. Configuration (level 1)
 7. API Reference (level 1) - if applicable
 8. Development Guide (level 1)
 9. Troubleshooting (level 1)
+
+For small projects, focus on essential sections. For larger projects, include comprehensive coverage.
 
 Return ONLY the JSON object, nothing else."""
 
@@ -1425,6 +1447,19 @@ class DocumentationGenerator:
         self.screenshot_agent = ScreenshotAgent()
         self.mermaid_agent = MermaidAgent()
         self.assembler = DocumentAssembler()
+
+        # Optimization settings
+        self.max_sections = int(os.getenv('MAX_SECTIONS', '15'))
+        self.min_sections = int(os.getenv('MIN_SECTIONS', '9'))
+        self.max_screenshots = int(os.getenv('MAX_SCREENSHOTS_PER_DOCUMENT', '8'))
+        self.max_mermaid_diagrams = int(os.getenv('MAX_MERMAID_DIAGRAMS', '3'))
+        self.screenshot_priority = os.getenv('SCREENSHOT_PRIORITY_SECTIONS',
+                                            'installation,configuration,architecture,usage').lower().split(',')
+        self.screenshot_priority = [s.strip() for s in self.screenshot_priority]
+
+        # Tracking counters
+        self.screenshot_count = 0
+        self.mermaid_count = 0
     
     def load_context(self) -> str:
         """Load project context from repomix or scan directory"""
@@ -1485,7 +1520,25 @@ class DocumentationGenerator:
         
         print(f"✓ Scanned project, loaded {file_count} files")
         return context
-    
+
+    def _should_capture_screenshot(self, section: DocumentSection) -> bool:
+        """Determine if a section should have screenshots based on priority.
+
+        Args:
+            section: The DocumentSection to evaluate
+
+        Returns:
+            bool: True if screenshots should be captured for this section
+        """
+        section_title_lower = section.title.lower()
+
+        # Check if any priority keyword is in the section title
+        for priority_keyword in self.screenshot_priority:
+            if priority_keyword in section_title_lower:
+                return True
+
+        return False
+
     def generate(self):
         """Main generation pipeline"""
         print(f"\n{'='*60}")
@@ -1499,7 +1552,12 @@ class DocumentationGenerator:
         
         # Phase 2: Create plan
         print("📋 Phase 2: Creating documentation plan...")
-        plan = self.gemini_agent.create_documentation_plan(context, self.project_name)
+        print(f"   Configuration: {self.min_sections}-{self.max_sections} sections based on project size")
+        plan = self.gemini_agent.create_documentation_plan(
+            context, self.project_name,
+            min_sections=self.min_sections,
+            max_sections=self.max_sections
+        )
         print(f"✓ Created plan with {len(plan.sections)} sections:")
         for i, section in enumerate(plan.sections, 1):
             print(f"  {i}. {section.title}")
@@ -1507,86 +1565,119 @@ class DocumentationGenerator:
         
         # Phase 3: Generate content
         print("✍️  Phase 3: Generating content...")
+        print(f"   Screenshot limit: {self.max_screenshots} per document")
         previous_content = ""
         enable_screenshots = os.getenv('ENABLE_SCREENSHOTS', 'true').lower() == 'true'
-        
+
         for i, section in enumerate(plan.sections, 1):
             print(f"  [{i}/{len(plan.sections)}] Generating: {section.title}")
-            
+
             content = self.gemini_agent.generate_section_content(
                 section, context, previous_content
             )
             section.content = content
             previous_content += f"\n\n## {section.title}\n{content}"
-            
-            # Capture screenshots if enabled
-            if enable_screenshots and section.images:
-                print(f"      📸 Capturing {len(section.images)} screenshots...")
-                targets = self.gemini_agent.identify_screenshot_targets(section, context)
-                
-                for j, target in enumerate(targets):
-                    if j >= len(section.images):
-                        break
-                    
-                    path = None
-                    if target['target_type'] == 'code_file':
-                        path = self.screenshot_agent.capture_code_file(
-                            target['target_path'],
-                            target.get('instructions', '')
-                        )
-                    elif target['target_type'] == 'directory_structure':
-                        path = self.screenshot_agent.capture_directory_tree()
-                    
-                    if path:
-                        section.images[j]['path'] = path
-        
-        print("✓ Content generation complete\n")
+
+            # Capture screenshots if enabled - with optimization
+            if enable_screenshots and section.images and self.screenshot_count < self.max_screenshots:
+                # Check if this section is in priority list
+                should_capture = self._should_capture_screenshot(section)
+
+                if should_capture:
+                    remaining_screenshots = self.max_screenshots - self.screenshot_count
+                    screenshots_to_capture = min(len(section.images), remaining_screenshots)
+
+                    if screenshots_to_capture > 0:
+                        print(f"      📸 Capturing {screenshots_to_capture} screenshot(s) ({self.screenshot_count}/{self.max_screenshots} used)...")
+                        targets = self.gemini_agent.identify_screenshot_targets(section, context)
+
+                        for j, target in enumerate(targets):
+                            if j >= screenshots_to_capture:
+                                break
+
+                            path = None
+                            if target['target_type'] == 'code_file':
+                                path = self.screenshot_agent.capture_code_file(
+                                    target['target_path'],
+                                    target.get('instructions', '')
+                                )
+                            elif target['target_type'] == 'directory_structure':
+                                path = self.screenshot_agent.capture_directory_tree()
+
+                            if path:
+                                section.images[j]['path'] = path
+                                self.screenshot_count += 1
+                else:
+                    print(f"      ⏭️  Skipping screenshots (not in priority sections)")
+            elif enable_screenshots and section.images and self.screenshot_count >= self.max_screenshots:
+                print(f"      ⚠️  Screenshot limit reached ({self.max_screenshots}), skipping")
+
+        print(f"✓ Content generation complete ({self.screenshot_count} screenshots captured)\n")
 
         # Phase 3.4: Generate Mermaid diagrams for architecture sections
         enable_mermaid = os.getenv('ENABLE_MERMAID_DIAGRAMS', 'true').lower() == 'true'
         if enable_mermaid and self.mermaid_agent.use_mermaid:
             print("🎨 Phase 3.4: Generating architecture diagrams...")
+            print(f"   Diagram limit: {self.max_mermaid_diagrams} for entire document")
 
+            # Priority sections for Mermaid diagrams (in order of priority)
+            diagram_priority_keywords = ['overview', 'architecture', 'design', 'components']
+
+            # Sort sections by priority
+            diagram_candidates = []
             for section in plan.sections:
-                # Generate diagrams for architecture/design sections
-                if any(keyword in section.title.lower()
-                       for keyword in ['architecture', 'design', 'overview', 'components']):
-                    print(f"    Generating diagram for: {section.title}")
+                section_title_lower = section.title.lower()
+                for priority_idx, keyword in enumerate(diagram_priority_keywords):
+                    if keyword in section_title_lower:
+                        diagram_candidates.append((priority_idx, section))
+                        break
 
-                    # Determine diagram type based on section
+            # Sort by priority (lower priority_idx = higher priority)
+            diagram_candidates.sort(key=lambda x: x[0])
+
+            # Generate diagrams up to the limit
+            for priority_idx, section in diagram_candidates:
+                if self.mermaid_count >= self.max_mermaid_diagrams:
+                    print(f"    ⚠️  Diagram limit reached ({self.max_mermaid_diagrams}), skipping remaining sections")
+                    break
+
+                print(f"    Generating diagram for: {section.title} ({self.mermaid_count + 1}/{self.max_mermaid_diagrams})")
+
+                # Determine diagram type based on section
+                diagram_type = "flowchart"
+                if "component" in section.title.lower():
                     diagram_type = "flowchart"
-                    if "component" in section.title.lower():
-                        diagram_type = "flowchart"
-                    elif "architecture" in section.title.lower():
-                        diagram_type = "flowchart"
+                elif "architecture" in section.title.lower():
+                    diagram_type = "flowchart"
 
-                    # Generate Mermaid code
-                    description = f"System architecture diagram for {section.title}"
-                    mermaid_code = self.mermaid_agent.generate_diagram_code(
-                        self.gemini_agent, context, diagram_type, description
-                    )
+                # Generate Mermaid code
+                description = f"System architecture diagram for {section.title}"
+                mermaid_code = self.mermaid_agent.generate_diagram_code(
+                    self.gemini_agent, context, diagram_type, description
+                )
 
-                    if mermaid_code:
-                        # Render to PNG
-                        diagram_name = section.title.lower().replace(' ', '_')
-                        diagram_path = self.mermaid_agent.render_diagram(mermaid_code, diagram_name)
+                if mermaid_code:
+                    # Render to PNG
+                    diagram_name = section.title.lower().replace(' ', '_')
+                    diagram_path = self.mermaid_agent.render_diagram(mermaid_code, diagram_name)
 
-                        if diagram_path:
-                            # Add diagram to section images
-                            if not section.images:
-                                section.images = []
-                            section.images.insert(0, {
-                                'description': f'Architecture Diagram: {section.title}',
-                                'path': diagram_path
-                            })
-                            # Store mermaid diagram info
-                            section.mermaid_diagrams.append({
-                                'description': description,
-                                'code': mermaid_code,
-                                'path': diagram_path
-                            })
+                    if diagram_path:
+                        # Add diagram to section images
+                        if not section.images:
+                            section.images = []
+                        section.images.insert(0, {
+                            'description': f'Architecture Diagram: {section.title}',
+                            'path': diagram_path
+                        })
+                        # Store mermaid diagram info
+                        section.mermaid_diagrams.append({
+                            'description': description,
+                            'code': mermaid_code,
+                            'path': diagram_path
+                        })
+                        self.mermaid_count += 1
 
-            print("✓ Architecture diagrams generated\n")
+            print(f"✓ Architecture diagrams generated ({self.mermaid_count} total)\n")
 
         # Phase 3.5: Capture live app screenshots
         live_app_enabled = os.getenv('LIVE_APP_ENABLED', 'false').lower() == 'true'
