@@ -67,25 +67,34 @@ def print_header(text: str) -> None:
 
 def check_env_file() -> Tuple[bool, Dict[str, str]]:
     """
-    Check if .env file exists and is properly configured.
-    
+    Check if environment variables are available (from .env or docker-compose).
+
     This function:
-    1. Checks if .env file exists in current directory
-    2. If missing, creates a template .env file with all required settings
-    3. If exists, loads and parses environment variables
-    4. Returns success status and loaded config
-    
+    1. First checks if env vars are already set (e.g., from docker-compose)
+    2. If not, checks if .env file exists in current directory
+    3. If missing, creates a template .env file with all required settings
+    4. If exists, loads and parses environment variables
+    5. Returns success status and loaded config
+
     Returns:
         Tuple[bool, Dict[str, str]]: (success, config_dict)
-            - success: True if .env exists and is readable
+            - success: True if env vars are available or .env exists
             - config_dict: Dictionary of environment variables
-            
+
     Side Effects:
-        - Creates .env file if it doesn't exist
+        - Creates .env file if it doesn't exist and no env vars are set
         - Prints error messages and instructions if problems found
     """
+    # Case 0: Check if environment variables are already set (e.g., from Docker)
+    # If GEMINI_API_KEY is set, assume we're running in Docker with env vars
+    if os.getenv('GEMINI_API_KEY'):
+        print(f"{Colors.OKGREEN}✓ Using environment variables from container{Colors.ENDC}")
+        # Load all environment variables into a dict
+        config = dict(os.environ)
+        return True, config
+
     env_file = Path('.env')
-    
+
     # Case 1: .env file doesn't exist → create template
     if not env_file.exists():
         print(f"{Colors.FAIL}❌ .env file not found!{Colors.ENDC}\n")
@@ -194,46 +203,45 @@ def validate_config(config: Dict[str, str]) -> List[str]:
                 print(f"ERROR: {error}")
     """
     errors = []
-    
-    # Required: API Key
+
+    # CRITICAL #1: API Key must exist
     api_key = config.get('GEMINI_API_KEY', '')
     if not api_key or api_key == 'your_api_key_here':
-        errors.append("GEMINI_API_KEY is not set or is still the placeholder")
-        errors.append("  → Get your free API key from: https://aistudio.google.com/apikey")
-    
-    # Required: Project Name
-    if not config.get('PROJECT_NAME'):
-        errors.append("PROJECT_NAME is not set")
-        errors.append("  → Set a descriptive name for your project")
-    
-    # Required: Project Path (must be absolute and exist)
+        errors.append("❌ GEMINI_API_KEY missing or invalid")
+        errors.append("   Get key: https://aistudio.google.com/apikey")
+
+    # CRITICAL #2: Project Path must exist
     project_path = config.get('PROJECT_PATH', '')
-    if not project_path:
-        errors.append("PROJECT_PATH is not set")
-        errors.append("  → Set the absolute path to your project directory")
-    elif not os.path.isabs(project_path):
-        errors.append(f"PROJECT_PATH must be absolute path, got: {project_path}")
-        errors.append(f"  → Use absolute paths like: /home/user/my-project")
-    elif not os.path.exists(project_path):
-        errors.append(f"PROJECT_PATH does not exist: {project_path}")
-        errors.append(f"  → Verify the path and fix typos")
-    elif not os.path.isdir(project_path):
-        errors.append(f"PROJECT_PATH is not a directory: {project_path}")
+    if not project_path or not os.path.exists(project_path):
+        errors.append(f"❌ PROJECT_PATH does not exist: {project_path}")
     
-    # Optional but validated if set: Browser choice
-    browser = config.get('BROWSER_CHOICE', 'chrome').lower()
-    if browser not in ['chrome', 'firefox']:
-        errors.append(f"Invalid BROWSER_CHOICE: {browser}")
-        errors.append("  → Must be 'chrome' or 'firefox'")
-    
-    # Validate repomix if enabled
+    # CRITICAL: Repomix file if enabled - check multiple locations
     if config.get('USE_REPOMIX', 'false').lower() == 'true':
-        repomix_path = config.get('REPOMIX_FILE_PATH', './repomix-output.txt')
-        if not os.path.exists(repomix_path):
-            errors.append(f"USE_REPOMIX=true but file not found: {repomix_path}")
-            errors.append("  → Generate with: repomix /path/to/project -o repomix-output.txt")
-            errors.append("  → Or set USE_REPOMIX=false to scan directory instead")
-    
+        repomix_path = config.get('REPOMIX_FILE_PATH', './repomix-output.xml')
+        project_path = config.get('PROJECT_PATH', '')
+
+        # Try multiple locations: specified path, project root, container dir
+        possible_paths = [
+            repomix_path,  # As specified
+            os.path.join(project_path, 'repomix-output.xml') if project_path else None,  # Project root
+            os.path.join(project_path, os.path.basename(repomix_path)) if project_path else None,  # Project + basename
+        ]
+        possible_paths = [p for p in possible_paths if p]  # Remove None values
+
+        found_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                found_path = path
+                break
+
+        if found_path:
+            # Update config with found path
+            config['REPOMIX_FILE_PATH'] = found_path
+        else:
+            errors.append(f"❌ Repomix file not found. Tried:")
+            for path in possible_paths:
+                errors.append(f"   - {path}")
+
     return errors
 
 
@@ -377,27 +385,26 @@ def main() -> int:
     # Step 4: Display configuration summary
     display_config_summary(config)
     
-    # Step 5: Check if live app screenshots are enabled
+    # Step 5: Check if live app screenshots are enabled - validate URLs respond
     if config.get('LIVE_APP_ENABLED', 'false').lower() == 'true':
-        print(f"{Colors.WARNING}⚠️  Live app screenshots are enabled{Colors.ENDC}")
-        print(f"{Colors.BOLD}Make sure your application is running before proceeding.{Colors.ENDC}\n")
-        
+        print(f"{Colors.OKBLUE}ℹ️  Live app screenshots enabled - checking URLs...{Colors.ENDC}")
+
         # Collect all LIVE_APP_URL_* variables
         live_urls = {k: v for k, v in config.items() if k.startswith('LIVE_APP_URL_')}
-        
+
         if live_urls:
-            print(f"{Colors.BOLD}URLs to capture:{Colors.ENDC}")
+            import urllib.request
             for key, url in live_urls.items():
                 name = key.replace('LIVE_APP_URL_', '').lower()
-                print(f"  - {name}: {Colors.OKCYAN}{url}{Colors.ENDC}")
+                try:
+                    # Quick health check - just verify URL responds
+                    req = urllib.request.Request(url, method='HEAD')
+                    urllib.request.urlopen(req, timeout=2)
+                    print(f"  ✓ {name}: {Colors.OKGREEN}{url}{Colors.ENDC}")
+                except Exception as e:
+                    # Just warn, don't fail - screenshot capture will handle errors
+                    print(f"  ⚠️  {name}: {Colors.WARNING}{url} (not responding - {str(e)[:50]}){Colors.ENDC}")
             print()
-        
-        # Prompt user to confirm app is running
-        response = input(f"{Colors.BOLD}Is your app running? (y/n): {Colors.ENDC}").strip().lower()
-        if response != 'y':
-            print(f"\n{Colors.WARNING}Exiting. Start your app and run again.{Colors.ENDC}\n")
-            return 1
-        print()
     
     # Step 6: Initialize and run the main generator
     print(f"{Colors.BOLD}🔧 Initializing generator...{Colors.ENDC}")

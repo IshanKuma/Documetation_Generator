@@ -10,14 +10,14 @@ services:
   doc-generator:
     # Image name with version tag
     # Version 1.2.2: Autonomous agent - no interactive prompts, smart repomix resolution
-    image: documentation_generator:1.2.4
+    image: documentation_generator:1.2.5
 
     # Build configuration (optional - only used if image doesn't exist)
     build:
       context: .
       dockerfile: Dockerfile
       tags:
-        - documentation_generator:1.2.4
+        - documentation_generator:1.2.5
         - documentation_generator:latest
 
     # Container name
@@ -74,6 +74,11 @@ services:
       - PROJECT_PATH=/app/project
       - "PROJECT_DESCRIPTION=Comprehensive FastAPI backend for managing industrial plots and zones across multiple African countries with JWT authentication, role-based access control, and Firebase Firestore integration"
 
+      # Documentation Metadata (Optional)
+      - DOCUMENTATION_AUTHOR=AI Documentation Team
+      - "DOCUMENTATION_CONTRIBUTORS=Claude AI, Development Team, Project Manager"
+      - DOCUMENTATION_ORGANIZATION=Your Organization Name
+
       # ==========================================
       # Repomix Configuration (Optional)
       # ==========================================
@@ -96,7 +101,7 @@ services:
       - ENABLE_SCREENSHOTS=true
       # Browser: 'chrome' or 'firefox' (chrome recommended for Docker)
       - BROWSER_CHOICE=chrome
-      - SCREENSHOT_WAIT_TIME=3
+      - SCREENSHOT_WAIT_TIME=7
 
       # Screenshot Optimization
       - MAX_SCREENSHOTS_PER_DOCUMENT=8
@@ -128,10 +133,10 @@ services:
       # Example for Linux with network_mode: host:
       #   - LIVE_APP_URL_HOME=http://127.0.0.1:8000  (requires network_mode: host below)
       #
-      - LIVE_APP_ENABLED=false
-      - LIVE_APP_URL_HOME=http://host.docker.internal:8000
-      - LIVE_APP_URL_DASHBOARD=http://host.docker.internal:8000/docs
-      - LIVE_APP_URL_API_DOCS=http://host.docker.internal:8000/redoc
+      - LIVE_APP_ENABLED=true
+      - LIVE_APP_URL_SWAGGER_DOCS=http://127.0.0.1:8000/docs
+      - LIVE_APP_URL_API_HOME=http://127.0.0.1:8000
+      - LIVE_APP_URL_REDOC=http://127.0.0.1:8000/redoc
 
       # ==========================================
       # Documentation Sections Control
@@ -161,7 +166,7 @@ services:
       # ==========================================
       # Enable to generate PDF in addition to DOCX
       # Note: PDF quality in Docker may be lower than native
-      - ENABLE_PDF_EXPORT=false
+      - ENABLE_PDF_EXPORT=true
 
     # Volume Mounts
     # ==========================================
@@ -208,7 +213,7 @@ services:
     # Note: network_mode: host works best on Linux. On Mac/Windows, use host.docker.internal instead.
     # When using host network mode, container shares host's network stack (no port mapping needed)
     #
-    # network_mode: host
+    network_mode: host
 
     # Healthcheck (Optional)
     # ==========================================

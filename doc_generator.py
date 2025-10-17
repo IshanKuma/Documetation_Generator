@@ -605,6 +605,13 @@ CRITICAL REQUIREMENTS:
 6. If this section needs images, reference them with [IMAGE: description] placeholders
 7. Use markdown formatting (**, *, bullet points) for readability
 8. Focus on benefits, capabilities, and high-level architecture
+9. **Include relevant URLs and references** when mentioning:
+   - Official documentation sites (e.g., https://docs.python.org)
+   - GitHub repositories
+   - API documentation
+   - Framework/library homepages
+   - Standards or specifications
+10. Include hyperlinks naturally in the text (URLs will be automatically converted to clickable links)
 
 AVOID:
 - Long code examples (use screenshots instead)
@@ -986,7 +993,7 @@ class MermaidAgent:
         Returns:
             str: Mermaid diagram code, or None if generation fails
         """
-        prompt = f"""Generate a SIMPLE and CONCISE Mermaid diagram for technical documentation.
+        prompt = f"""Generate an EXTREMELY SIMPLE and CONCISE Mermaid diagram for technical documentation.
 
 Diagram Type: {diagram_type}
 Description: {description}
@@ -997,26 +1004,36 @@ Project Context:
 Generate ONLY the Mermaid diagram code (no markdown code blocks, no explanations).
 Start directly with the diagram type (e.g., 'graph TD', 'sequenceDiagram', 'classDiagram').
 
+CRITICAL SIZE REQUIREMENTS (MUST FOLLOW):
+- MAXIMUM 5-7 nodes/components ONLY (absolute limit!)
+- Each node label: 2-3 words maximum
+- Total diagram code: under 500 characters
+- Use single-letter IDs (A, B, C, etc.) for nodes
+- Minimize text, maximize clarity
+
 CRITICAL REQUIREMENTS:
-- MAXIMUM 8-10 nodes/components (keep it simple!)
-- Use SHORT labels (max 3-4 words per node)
-- Focus on HIGH-LEVEL architecture only
-- Avoid detailed implementation
-- Keep syntax minimal
+- Focus on TOP-LEVEL architecture only
+- NO implementation details
+- NO nested structures
+- Simple linear or tree structure
+- Use minimal Mermaid syntax
 
-For {diagram_type}:
-- Make it clear and readable
-- Include only KEY components from the codebase
-- Use proper Mermaid syntax
-- Keep labels SHORT
-
-Example GOOD diagram:
+GOOD Example (follow this pattern):
 graph TD
-    A[Client] --> B[API Gateway]
-    B --> C[Auth Service]
-    B --> D[Database]
+    A[User] --> B[API]
+    B --> C[Auth]
+    B --> D[DB]
 
-Return ONLY the Mermaid code."""
+BAD Example (too complex, DO NOT do this):
+graph TD
+    User[User Interface Layer] --> API[API Gateway Service]
+    API --> Auth[Authentication Module with JWT]
+    API --> Data[Data Access Layer]
+    Data --> DB1[Primary Database]
+    Data --> DB2[Cache Layer]
+    etc...
+
+Return ONLY the Mermaid code. Keep it MINIMAL."""
 
         try:
             response = gemini_agent._make_request(prompt, request_type='diagram')
@@ -1035,7 +1052,12 @@ Return ONLY the Mermaid code."""
             return None
 
     def render_diagram(self, mermaid_code: str, output_name: str) -> Optional[str]:
-        """Render Mermaid code to PNG image.
+        """Render Mermaid code to PNG image with improved error handling.
+
+        Implements multiple rendering strategies with better ChromeDriver compatibility:
+        1. mermaid-cli (mmdc) with Puppeteer config
+        2. mermaid.ink online service (with size checks)
+        3. Fallback: Save as text file
 
         Args:
             mermaid_code: Mermaid diagram code
@@ -1054,7 +1076,9 @@ Return ONLY the Mermaid code."""
                 with open(temp_mmd, 'w', encoding='utf-8') as f:
                     f.write(mermaid_code)
 
-                # Render using mmdc
+                # Enhanced mmdc command with Puppeteer configuration for Docker
+                # --puppeteerConfigFile can specify Chrome path
+                # For Docker, we use environment variable PUPPETEER_EXECUTABLE_PATH
                 cmd = [
                     'mmdc',
                     '-i', str(temp_mmd),
@@ -1065,7 +1089,17 @@ Return ONLY the Mermaid code."""
                     '-H', '800'  # Height
                 ]
 
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                # Set environment for Puppeteer if in Docker
+                env = os.environ.copy()
+                # Try to use system Chrome if available
+                if os.path.exists('/usr/bin/chromium'):
+                    env['PUPPETEER_EXECUTABLE_PATH'] = '/usr/bin/chromium'
+                elif os.path.exists('/usr/bin/chromium-browser'):
+                    env['PUPPETEER_EXECUTABLE_PATH'] = '/usr/bin/chromium-browser'
+                elif os.path.exists('/usr/bin/google-chrome'):
+                    env['PUPPETEER_EXECUTABLE_PATH'] = '/usr/bin/google-chrome'
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
 
                 if result.returncode == 0 and output_path.exists():
                     print(f"    ✓ Rendered: {output_name}")
@@ -1073,39 +1107,71 @@ Return ONLY the Mermaid code."""
                     temp_mmd.unlink()
                     return str(output_path)
                 else:
-                    print(f"    ⚠️  mmdc failed: {result.stderr[:200]}")
+                    error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    # Check for specific Chrome errors
+                    if "Could not find Chrome" in result.stderr:
+                        print(f"    ⚠️  mmdc failed: Chrome/Chromium not found for Puppeteer")
+                        print(f"       Tip: Install chromium in Docker: apt-get install chromium")
+                    else:
+                        print(f"    ⚠️  mmdc failed: {error_msg}")
+            except subprocess.TimeoutExpired:
+                print(f"    ⚠️  mmdc timeout (>30s)")
             except Exception as e:
-                print(f"    ⚠️  Rendering error: {e}")
+                print(f"    ⚠️  mmdc rendering error: {e}")
 
         # Strategy 2: Use mermaid.ink online service
-        # Skip if code is too long (>2000 chars causes URI Too Long error)
-        if len(mermaid_code) < 2000:
+        # Enhanced size check: Check both code length and encoded URL length
+        # URI Too Long error happens when full URL exceeds ~2000-8000 chars depending on server
+        max_code_size = 1500  # Conservative limit to avoid URI Too Long
+
+        if len(mermaid_code) < max_code_size:
             try:
                 import base64
                 import urllib.request
-                import urllib.parse
+                import urllib.error
 
                 # Encode Mermaid code
                 encoded = base64.urlsafe_b64encode(mermaid_code.encode('utf-8')).decode('ascii')
                 url = f"https://mermaid.ink/img/{encoded}"
 
-                # Download rendered image
-                urllib.request.urlretrieve(url, output_path)
+                # Check estimated URL length
+                if len(url) > 8000:
+                    print(f"    ⚠️  Encoded URL too long ({len(url)} chars), skipping mermaid.ink")
+                else:
+                    # Download rendered image with timeout
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        with open(output_path, 'wb') as f:
+                            f.write(response.read())
 
-                if output_path.exists() and output_path.stat().st_size > 0:
-                    print(f"    ✓ Rendered via mermaid.ink: {output_name}")
-                    return str(output_path)
+                    if output_path.exists() and output_path.stat().st_size > 0:
+                        print(f"    ✓ Rendered via mermaid.ink: {output_name}")
+                        return str(output_path)
+
+            except urllib.error.HTTPError as e:
+                if e.code == 414:
+                    print(f"    ⚠️  mermaid.ink: URI Too Long (diagram too complex)")
+                    print(f"       Simplify diagram or install mermaid-cli locally")
+                else:
+                    print(f"    ⚠️  mermaid.ink HTTP error {e.code}: {e.reason}")
+            except urllib.error.URLError as e:
+                print(f"    ⚠️  mermaid.ink connection error: {e.reason}")
             except Exception as e:
                 print(f"    ⚠️  mermaid.ink rendering failed: {e}")
         else:
-            print(f"    ⚠️  Mermaid code too large ({len(mermaid_code)} chars) for mermaid.ink, skipping online render")
+            print(f"    ⚠️  Mermaid code too large ({len(mermaid_code)} chars)")
+            print(f"       Exceeds safe limit ({max_code_size} chars) for mermaid.ink")
 
         # Strategy 3: Save Mermaid code as text file (fallback)
         try:
             text_path = self.diagrams_dir / f"{output_name}.txt"
             with open(text_path, 'w', encoding='utf-8') as f:
-                f.write(f"Mermaid Diagram Code:\n\n{mermaid_code}")
-            print(f"    ℹ️  Saved Mermaid code to: {text_path}")
+                f.write(f"# Mermaid Diagram: {output_name}\n")
+                f.write(f"# Unable to render to image - code saved for manual rendering\n")
+                f.write(f"# Render online: https://mermaid.live/\n\n")
+                f.write(mermaid_code)
+            print(f"    ℹ️  Saved Mermaid code to: {text_path.name}")
+            print(f"       Render manually at: https://mermaid.live/")
             return None  # No image available
         except Exception as e:
             print(f"    ⚠️  Failed to save Mermaid code: {e}")
@@ -1173,14 +1239,121 @@ class DocumentAssembler:
         # Add author/organization if specified in environment
         author = os.getenv('DOCUMENTATION_AUTHOR', '')
         if author:
+            self.doc.add_paragraph()
             author_para = self.doc.add_paragraph()
             author_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             author_run = author_para.add_run(f"Author: {author}")
             author_run.font.size = Pt(10)
             author_run.font.color.rgb = RGBColor(100, 100, 100)
 
+        # Add contributors list if specified
+        # Format: Comma-separated list in DOCUMENTATION_CONTRIBUTORS env var
+        # Example: "John Doe, Jane Smith, Bob Johnson"
+        contributors = os.getenv('DOCUMENTATION_CONTRIBUTORS', '')
+        if contributors:
+            self.doc.add_paragraph()
+            self.doc.add_paragraph()
+
+            # Contributors heading
+            contrib_heading = self.doc.add_paragraph()
+            contrib_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            contrib_heading_run = contrib_heading.add_run("Contributors")
+            contrib_heading_run.font.size = Pt(14)
+            contrib_heading_run.font.bold = True
+            contrib_heading_run.font.color.rgb = RGBColor(0, 102, 204)
+
+            self.doc.add_paragraph()
+
+            # Parse and display contributors
+            contrib_list = [c.strip() for c in contributors.split(',') if c.strip()]
+            for contributor in contrib_list:
+                contrib_para = self.doc.add_paragraph()
+                contrib_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                contrib_run = contrib_para.add_run(f"• {contributor}")
+                contrib_run.font.size = Pt(10)
+                contrib_run.font.color.rgb = RGBColor(80, 80, 80)
+
+        # Add organization/company if specified
+        organization = os.getenv('DOCUMENTATION_ORGANIZATION', '')
+        if organization:
+            self.doc.add_paragraph()
+            org_para = self.doc.add_paragraph()
+            org_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            org_run = org_para.add_run(f"© {organization}")
+            org_run.font.size = Pt(10)
+            org_run.font.italic = True
+            org_run.font.color.rgb = RGBColor(128, 128, 128)
+
         self.doc.add_page_break()
-    
+
+    def add_table_of_contents(self, sections: List[DocumentSection]):
+        """Generate and add a Table of Contents page.
+
+        Creates a professional TOC with section titles and page numbers.
+        Uses hyperlinks for easy navigation within the document.
+
+        Why this is important:
+        - Provides quick navigation for large documents
+        - Improves document professionalism and usability
+        - Essential for stakeholder documentation
+
+        Args:
+            sections: List of DocumentSection objects to include in TOC
+
+        Note:
+            Page numbers in Word documents are automatically updated when
+            the document is opened. The TOC uses field codes for dynamic updates.
+        """
+        # Add TOC title
+        toc_heading = self.doc.add_paragraph()
+        toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        toc_run = toc_heading.add_run("Table of Contents")
+        toc_run.font.size = Pt(24)
+        toc_run.font.bold = True
+        toc_run.font.color.rgb = RGBColor(0, 102, 204)
+
+        self.doc.add_paragraph()  # Spacing
+
+        # Add TOC entries for each section
+        for i, section in enumerate(sections, 1):
+            # Create TOC entry paragraph
+            toc_entry = self.doc.add_paragraph()
+
+            # Indent based on level
+            if section.level == 1:
+                toc_entry.paragraph_format.left_indent = Inches(0)
+                # Level 1: Bold and larger
+                entry_run = toc_entry.add_run(f"{i}. {section.title}")
+                entry_run.font.bold = True
+                entry_run.font.size = Pt(12)
+                entry_run.font.color.rgb = RGBColor(0, 0, 0)
+            else:  # level 2 or higher
+                toc_entry.paragraph_format.left_indent = Inches(0.3 * section.level)
+                # Subsections: Regular weight
+                entry_run = toc_entry.add_run(f"{i}. {section.title}")
+                entry_run.font.size = Pt(11)
+                entry_run.font.color.rgb = RGBColor(64, 64, 64)
+
+            # Add dotted line leader (visual guide to page numbers)
+            # Note: Page numbers will be added when document is opened in Word
+            toc_entry.paragraph_format.tab_stops.add_tab_stop(Inches(6))
+
+        # Add instruction for updating TOC
+        self.doc.add_paragraph()
+        instruction = self.doc.add_paragraph()
+        instruction.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        instr_run = instruction.add_run(
+            "Note: Page numbers will be available when viewing in Word/LibreOffice"
+        )
+        instr_run.font.size = Pt(9)
+        instr_run.font.italic = True
+        instr_run.font.color.rgb = RGBColor(128, 128, 128)
+
+        # Page break after TOC
+        self.doc.add_page_break()
+
+        print("✓ Table of Contents added")
+
     def add_section(self, section: DocumentSection):
         """Add a complete section to the document"""
         # Add heading
@@ -1250,22 +1423,103 @@ class DocumentAssembler:
                         pass
                     self.doc.add_paragraph()
     
+    def _add_hyperlink(self, paragraph, url: str, text: str):
+        """Add a hyperlink to a paragraph.
+
+        Creates a clickable hyperlink in the Word document using OPC (Open Packaging Convention).
+        This enables users to click URLs directly from the generated documentation.
+
+        Why this is important:
+        - Makes documentation more interactive and user-friendly
+        - Allows easy access to external resources (APIs, repos, docs)
+        - Essential for modern technical documentation
+
+        Args:
+            paragraph: python-docx Paragraph object to add hyperlink to
+            url: The target URL (e.g., "https://github.com/user/repo")
+            text: Display text for the hyperlink
+
+        Note:
+            Uses XML manipulation since python-docx doesn't have native hyperlink support.
+            The hyperlink will be blue and underlined by default in Word.
+        """
+        from docx.oxml.shared import OxmlElement
+        from docx.oxml.ns import qn
+
+        # Create a relationship for the hyperlink
+        part = paragraph.part
+        r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
+
+        # Create the hyperlink element
+        hyperlink = OxmlElement('w:hyperlink')
+        hyperlink.set(qn('r:id'), r_id)
+
+        # Create a new run with the link text
+        new_run = OxmlElement('w:r')
+        rPr = OxmlElement('w:rPr')
+
+        # Style the hyperlink (blue color and underline)
+        color = OxmlElement('w:color')
+        color.set(qn('w:val'), '0000FF')  # Blue color
+        rPr.append(color)
+
+        u = OxmlElement('w:u')
+        u.set(qn('w:val'), 'single')  # Underline
+        rPr.append(u)
+
+        new_run.append(rPr)
+        text_elem = OxmlElement('w:t')
+        text_elem.text = text
+        new_run.append(text_elem)
+
+        hyperlink.append(new_run)
+        paragraph._p.append(hyperlink)
+
     def _add_formatted_paragraph(self, text: str):
-        """Add paragraph with markdown formatting"""
+        """Add paragraph with markdown formatting and automatic URL detection.
+
+        Enhanced to detect URLs and convert them to clickable hyperlinks.
+        Supports markdown formatting (bold, italic) alongside hyperlinks.
+
+        URL Detection:
+        - Detects http://, https://, and www. URLs
+        - Converts them to clickable hyperlinks automatically
+        - Preserves surrounding text formatting
+
+        Args:
+            text: Text content with optional markdown formatting and URLs
+        """
+        import re
+
         para = self.doc.add_paragraph()
-        
-        # Simple markdown parsing
-        parts = text.split('**')
-        for i, part in enumerate(parts):
-            if i % 2 == 1:  # Bold
-                run = para.add_run(part)
-                run.font.bold = True
+
+        # URL pattern: matches http://, https://, and www. URLs
+        url_pattern = r'(https?://[^\s]+|www\.[^\s]+)'
+
+        # Split text by URLs to handle them separately
+        parts = re.split(url_pattern, text)
+
+        for part in parts:
+            # Check if this part is a URL
+            if re.match(url_pattern, part):
+                # Add URL as hyperlink
+                url = part if part.startswith('http') else f'http://{part}'
+                self._add_hyperlink(para, url, part)
             else:
-                italic_parts = part.split('*')
-                for j, ipart in enumerate(italic_parts):
-                    run = para.add_run(ipart)
-                    if j % 2 == 1:
-                        run.font.italic = True
+                # Process markdown formatting for non-URL parts
+                # Simple markdown parsing
+                bold_parts = part.split('**')
+                for i, bold_part in enumerate(bold_parts):
+                    if i % 2 == 1:  # Bold
+                        run = para.add_run(bold_part)
+                        run.font.bold = True
+                    else:
+                        italic_parts = bold_part.split('*')
+                        for j, ipart in enumerate(italic_parts):
+                            if ipart:  # Skip empty strings
+                                run = para.add_run(ipart)
+                                if j % 2 == 1:
+                                    run.font.italic = True
     
     def _add_code_block(self, code: str):
         """Add formatted code block"""
@@ -1848,7 +2102,10 @@ class DocumentationGenerator:
         # Phase 4: Assemble document
         print("📄 Phase 4: Assembling Word document...")
         self.assembler.add_title_page(plan.title, self.project_name)
-        
+
+        # Add Table of Contents after title page
+        self.assembler.add_table_of_contents(plan.sections)
+
         for section in plan.sections:
             self.assembler.add_section(section)
         
