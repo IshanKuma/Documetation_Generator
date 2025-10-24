@@ -1,15 +1,17 @@
 # Documentation Generator - Project Context
 
 > **Project:** AI-Powered Documentation Generator (Gemini Edition)
-> **Last Updated:** 2025-10-09
-> **Version:** 2.0.0
-> **Stack:** Python 3.8+, Google Gemini API, Selenium, python-docx
+> **Last Updated:** 2025-10-24
+> **Version:** 1.2.5
+> **Stack:** Python 3.13+, Google Gemini 2.5 Flash-Lite, Selenium, python-docx, Mermaid
 
 ---
 
 ## 🎯 Project Overview
 
-An **automated technical documentation generation system** that creates comprehensive Word (.docx) and PDF documentation from codebases using Google's Gemini 2.5 Pro AI model. This tool analyzes code, captures screenshots, and generates professional documentation with minimal human intervention.
+An **automated technical documentation generation system** that creates comprehensive Word (.docx) and PDF documentation from codebases using Google's Gemini 2.5 Flash-Lite AI model. This tool analyzes code, captures screenshots, generates architecture diagrams, and assembles professional documentation with minimal human intervention.
+
+**Status:** Production Ready ✅ | Dockerized | Multi-Agent Architecture
 
 **Core Purpose:** Transform any software project into professionally formatted technical documentation by:
 1. Analyzing codebase structure (via repomix or directory scan)
@@ -1089,6 +1091,82 @@ git commit -m "feat(export): add PDF export support
   - Implemented GeminiDocAgent, ScreenshotAgent, DocumentAssembler
   - Added .env-based configuration
   - Created comprehensive documentation suite
+- **v1.2.0** (2025-10-14): Mermaid diagrams and JSON parsing fix
+  - Integrated MermaidAgent from phase-2 branch
+  - Fixed JSON parsing issues (forced json_mode in API)
+  - Resolved 3-section fallback bug
+- **v1.2.2** (2025-10-15): Intelligent rate limiting
+  - Per-minute request tracking
+  - Type-specific delays
+  - Exponential backoff on 429 errors
+- **v1.2.4** (2025-10-15): ChromeDriver compatibility fix
+  - System ChromeDriver via CHROMEDRIVER_PATH
+  - Chromium + chromium-driver from apt (matched versions)
+  - Improved Docker lifecycle management
+- **v1.2.5** (2025-10-24): Documentation and UX enhancements
+  - Table of Contents with auto-numbering
+  - Clickable hyperlinks in documentation
+  - Contributors and organization metadata
+  - **Complete README.md rewrite** with accurate architecture
+  - **Complete IMPLEMENTATION_STATUS.md rewrite** with feature matrix
+  - Clarified browser dependencies (Selenium vs Puppeteer)
+
+---
+
+## 📋 Recent Changes (v1.2.5 - 2025-10-24)
+
+### Documentation Overhaul
+**What Changed:** Complete rewrite of README.md and IMPLEMENTATION_STATUS.md
+
+**Motivation:**
+- Previous README was outdated and missing critical information
+- Browser dependencies were unclear (confusion between Selenium and Puppeteer)
+- Docker configuration in docker-compose.yml wasn't properly documented
+- Model information was incorrect (showing Pro instead of Flash-Lite)
+
+**Key Updates:**
+1. **README.md** (Now Comprehensive):
+   - Architecture diagram showing 4-agent system
+   - Browser dependency clarification:
+     - Selenium + Chromium for screenshots (Python direct)
+     - Puppeteer ONLY used by mermaid-cli (Node.js)
+   - Complete docker-compose.yml configuration guide
+   - Gemini 2.5 Flash-Lite usage explained (15 RPM free tier)
+   - All 4 agents documented with file locations
+   - Quick start for both Docker and non-Docker
+   - Troubleshooting section
+
+2. **IMPLEMENTATION_STATUS.md** (Feature-Complete):
+   - Feature implementation matrix (all features, status, versions, locations)
+   - Browser dependencies detailed breakdown
+   - Testing & validation results
+   - Performance metrics
+   - Files recommended for cleanup
+   - Version roadmap
+
+3. **Browser Clarification:**
+   ```
+   Screenshots:  Python → Selenium → ChromeDriver → Chromium
+   Diagrams:     Python → mmdc (Node.js) → Puppeteer → Chromium
+   ```
+   - No Chrome dependency (only Chromium)
+   - No Puppeteer in Python code (only via mermaid-cli)
+   - Browser only spins up when needed
+
+4. **Configuration Management:**
+   - All config in docker-compose.yml (no separate .env for Docker)
+   - Environment variables fully documented inline
+   - Rate limiting optimized for free tier
+
+**Files Changed:**
+- `README.md` - Complete rewrite (~500 lines)
+- `IMPLEMENTATION_STATUS.md` - Complete rewrite (~700 lines)
+
+**Files Identified for Cleanup:**
+- Large Docker images (1.8GB total) - can be regenerated
+- `.env` file (has API keys, already gitignored but present)
+- `repomix-output.xml` (generated file)
+- `venv/`, `__pycache__/` (already gitignored but tracked)
 
 ---
 

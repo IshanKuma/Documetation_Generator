@@ -5,7 +5,47 @@ All notable changes to the Documentation Generator project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2] - 2025-10-15
+## [1.2.5] - 2025-10-24
+
+### Added
+- **Table of Contents**: Auto-numbered TOC with hierarchical section listing
+- **Hyperlink Support**: Automatic URL detection and clickable links in generated docs
+- **Contributors Metadata**: Support for author, contributors list, and organization info
+  - Environment variables: `DOCUMENTATION_AUTHOR`, `DOCUMENTATION_CONTRIBUTORS`, `DOCUMENTATION_ORGANIZATION`
+
+### Changed
+- **Complete Documentation Rewrite**:
+  - **README.md**: Comprehensive rewrite (~500 lines) with accurate architecture, browser dependencies clarification, Docker setup guide, and troubleshooting
+  - **IMPLEMENTATION_STATUS.md**: Complete rewrite (~700 lines) with feature matrix, testing results, performance metrics, and version roadmap
+- **Browser Dependencies Clarified**:
+  - Documented that Selenium + Chromium is used for screenshots (Python direct)
+  - Documented that Puppeteer is ONLY used by mermaid-cli for diagrams (Node.js)
+  - No Chrome dependency (only Chromium)
+- **Model Information Corrected**: Documentation now correctly shows `gemini-2.5-flash-lite` (not Pro)
+- **Configuration Guide**: Docker-compose.yml fully documented as single source of configuration
+
+### Improved
+- Mermaid diagram generation prompts (5-7 nodes max, <500 chars)
+- Diagram size limits to prevent rendering failures
+- Error handling for diagram rendering with better fallback messages
+
+---
+
+## [1.2.4] - 2025-10-15
+
+### Fixed
+- ChromeDriver version mismatch in Docker
+- Screenshot failures in containerized environment
+- Mermaid diagram rendering issues
+
+### Changed
+- Use system ChromeDriver from apt (matches system Chromium version)
+- Set `CHROMEDRIVER_PATH=/usr/bin/chromedriver` in Docker
+- Improved Puppeteer configuration for mermaid-cli
+
+---
+
+## [1.2.2] - 2025-10-15
 
 ### Added
 - **Intelligent Rate Limiting**: Configurable request delays to prevent hitting Gemini API limits
