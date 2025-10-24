@@ -622,10 +622,27 @@ AVOID:
 Generate ONLY the section content. No preamble, no explanations about the content."""
 
         content = self._make_request(prompt, request_type='section')
-        
-        # Extract code blocks
-        section.code_blocks = self._extract_code_blocks(content)
-        
+
+        # Extract code blocks - ONLY if no screenshots available
+        # Reasoning: Screenshots provide visual code representation, making text blocks redundant
+        # This keeps documentation graphic-focused instead of text-heavy
+        enable_code_blocks = os.getenv('ENABLE_CODE_BLOCKS', 'auto').lower()
+
+        if enable_code_blocks == 'always':
+            # Force include code blocks regardless of screenshots
+            section.code_blocks = self._extract_code_blocks(content)
+        elif enable_code_blocks == 'never':
+            # Never include code blocks
+            section.code_blocks = []
+        else:  # 'auto' (default)
+            # Only extract code blocks if section has NO screenshots
+            if not section.images:
+                section.code_blocks = self._extract_code_blocks(content)
+                print(f"      📝 Extracted {len(section.code_blocks)} code block(s) (no screenshots)")
+            else:
+                section.code_blocks = []
+                print(f"      📸 Skipping code blocks (screenshots available)")
+
         return content
     
     def _extract_code_blocks(self, content: str) -> List[str]:
@@ -729,6 +746,22 @@ class ScreenshotAgent:
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
+
+            # CRITICAL FIX: Set Chrome/Chromium binary location
+            # In Docker, Chromium is at /usr/bin/chromium (set via CHROME_BIN env var)
+            # Without this, Selenium looks for 'google-chrome' or 'chrome' and fails
+            chrome_binary = os.getenv('CHROME_BIN', '/usr/bin/chromium')
+            if os.path.exists(chrome_binary):
+                options.binary_location = chrome_binary
+                print(f"✓ Using Chrome/Chromium binary: {chrome_binary}")
+            else:
+                print(f"⚠️  Chrome binary not found at {chrome_binary}, using system default")
+
+            # Additional stability options for live URL screenshots
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-web-security')  # For localhost/CORS issues
+            options.add_argument('--ignore-certificate-errors')  # For self-signed certs
 
             # Use system ChromeDriver if available (Docker), otherwise download
             chromedriver_path = os.getenv('CHROMEDRIVER_PATH')
@@ -915,8 +948,59 @@ class ScreenshotAgent:
             print(f"⚠️  Directory tree screenshot failed: {e}")
             return None
     
+    def _validate_url(self, url: str) -> bool:
+        """Validate URL format and basic reachability.
+
+        Checks:
+        - Proper URL format (http/https with valid domain or IP)
+        - Supports localhost, IP addresses, and domain names
+        - Validates port numbers (1-65535)
+
+        Args:
+            url: URL string to validate
+
+        Returns:
+            bool: True if URL format is valid, False otherwise
+
+        Examples:
+            ✅ http://localhost:8000
+            ✅ http://127.0.0.1:8000/docs
+            ✅ https://api.example.com
+            ✅ http://192.168.1.100:3000
+            ❌ htp://invalid
+            ❌ not-a-url
+        """
+        import re
+
+        # Comprehensive URL pattern supporting:
+        # - http/https protocols
+        # - localhost
+        # - IPv4 addresses (e.g., 127.0.0.1, 192.168.1.1)
+        # - Domain names (e.g., example.com, api.example.com)
+        # - Optional ports (e.g., :8000, :3000)
+        # - Optional paths (e.g., /docs, /api/v1)
+        url_pattern = r'^https?://(localhost|(\d{1,3}\.){3}\d{1,3}|([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})(:\d{1,5})?(/.*)?$'
+
+        if not re.match(url_pattern, url, re.IGNORECASE):
+            return False
+
+        # Additional validation: Check port range (1-65535)
+        port_match = re.search(r':(\d+)', url)
+        if port_match:
+            port = int(port_match.group(1))
+            if port < 1 or port > 65535:
+                return False
+
+        return True
+
     def capture_live_url(self, url: str, name: str) -> Optional[str]:
         """Capture screenshot of a running application"""
+        # Validate URL format first
+        if not self._validate_url(url):
+            print(f"    ✗ Invalid URL format: {url}")
+            print(f"       Expected: http(s)://domain:port/path or http://localhost:port")
+            return None
+
         try:
             driver = self._get_driver()
             driver.get(url)
